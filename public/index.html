@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>UNIMIB Magistrale Informatica - Orari</title>
+
+  <!-- PWA Meta Tags -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#1E293B">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="UNIMIB Orari">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+
+  <!-- CSS Styles -->
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <!-- Sticky Mobile Header -->
+  <header class="app-header">
+    <div class="nav-top">
+      <div class="app-title">
+        <div class="app-logo">📅</div>
+        <div>
+          <h1>UNIMIB Orari</h1>
+          <p>2° Anno Magistrale Informatica</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btnRefresh" class="btn-icon" title="Aggiorna Calendario">🔄</button>
+        <button id="btnMobileInfo" class="btn-icon" title="Connetti Smartphone">📱</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Filter & Mode Selection -->
+  <div class="filter-container">
+    <div class="toggle-group">
+      <button id="btnFilterTarget" class="toggle-btn active">⭐ I Miei 3 Corsi</button>
+      <button id="btnFilterAll" class="toggle-btn">📚 Tutti i Corsi</button>
+    </div>
+
+    <!-- Live Search Bar -->
+    <div style="position: relative;">
+      <input type="text" id="searchInput" placeholder="🔍 Cerca per corso, docente o aula..." 
+             style="width: 100%; padding: 10px 14px; border-radius: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #FFF; font-size: 0.85rem; outline: none;">
+    </div>
+  </div>
+
+  <!-- Week Navigation Bar -->
+  <div class="week-navigator">
+    <button id="btnPrevWeek" class="week-nav-btn">◀ Prev</button>
+    <div class="week-label">
+      <div id="weekLabelText" class="date-range">Caricamento...</div>
+      <span id="btnToday" class="badge-status" style="cursor: pointer;">Oggi / Questa Settimana</span>
+    </div>
+    <button id="btnNextWeek" class="week-nav-btn">Next ▶</button>
+  </div>
+
+  <!-- Day Tabs (Horizontal Scroll on Mobile) -->
+  <div id="daysTabBar" class="days-tab-bar">
+    <!-- Rendered dynamically by app.js -->
+  </div>
+
+  <!-- Main Content Area -->
+  <main>
+    <div id="spinnerContainer" class="spinner-container">
+      <div class="spinner"></div>
+      <p style="font-size:0.85rem; color:var(--text-secondary);">Scraping calendario UNIMIB in corso...</p>
+    </div>
+
+    <div id="eventsContainer" class="events-container" style="display: none;">
+      <!-- Events rendered dynamically by app.js -->
+    </div>
+  </main>
+
+  <!-- QR Code & Mobile Connection Modal -->
+  <div id="qrModal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>📱 Connetti lo Smartphone</h3>
+        <button id="btnCloseQrModal" class="btn-icon" style="width:30px; height:30px;">✕</button>
+      </div>
+      <p style="font-size:0.85rem; color:var(--text-secondary);">
+        Scansiona questo QR Code dalla fotocamera del tuo telefono per aprire subito l'applicazione sulla stessa rete Wi-Fi:
+      </p>
+      <div class="qr-box">
+        <img id="qrImage" src="" alt="QR Code">
+      </div>
+      <div id="mobileUrlText" class="mobile-url-box">http://...</div>
+      <button id="btnCloseQrModal" class="btn-primary" onclick="document.getElementById('qrModal').classList.remove('active')">Chiudi</button>
+    </div>
+  </div>
+
+  <!-- Notification Toast -->
+  <div id="toastNotification" class="toast">Messaggio</div>
+
+  <!-- JS Logic -->
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
