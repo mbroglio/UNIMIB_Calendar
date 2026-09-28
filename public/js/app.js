@@ -6,7 +6,7 @@ let state = {
   currentMonday: null,
   activeFilter: 'target', // 'target' (the 3 courses) or 'all'
   selectedDayDate: 'all',  // 'all' or '28-09-2026'
-  calendarData: None = null,
+  calendarData: null,
   searchQuery: '',
   serverInfo: null
 };
@@ -39,7 +39,7 @@ async function initApp() {
 
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').catch(err => {
+    navigator.serviceWorker.register('/js/sw.js').catch(err => {
       console.warn('SW registration failed:', err);
     });
   }
@@ -50,12 +50,20 @@ async function fetchServerInfo() {
     const res = await fetch('/api/info');
     if (res.ok) {
       state.serverInfo = await res.json();
-      document.getElementById('mobileUrlText').textContent = state.serverInfo.mobile_url;
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(state.serverInfo.mobile_url)}`;
+      const mobileUrl = state.serverInfo.mobile_url || window.location.href;
+      document.getElementById('mobileUrlText').textContent = mobileUrl;
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(mobileUrl)}`;
+      document.getElementById('qrImage').src = qrUrl;
+    } else {
+      document.getElementById('mobileUrlText').textContent = window.location.href;
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(window.location.href)}`;
       document.getElementById('qrImage').src = qrUrl;
     }
   } catch (err) {
     console.warn('Could not fetch server info', err);
+    document.getElementById('mobileUrlText').textContent = window.location.href;
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(window.location.href)}`;
+    document.getElementById('qrImage').src = qrUrl;
   }
 }
 
@@ -79,10 +87,9 @@ function setupEventListeners() {
   });
   
   document.getElementById('btnToday').addEventListener('click', () => {
-    if (state.serverInfo) {
-      state.currentMonday = state.serverInfo.current_monday;
-      loadCalendar(state.currentMonday);
-    }
+    state.currentMonday = formatFormattedDate(getMonday(new Date()));
+    state.selectedDayDate = 'all';
+    loadCalendar(state.currentMonday);
   });
 
   document.getElementById('btnRefresh').addEventListener('click', () => {

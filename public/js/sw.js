@@ -1,8 +1,8 @@
 const CACHE_NAME = 'unimib-calendar-v1';
 const ASSETS = [
   '/',
-  '/static/css/style.css',
-  '/static/js/app.js',
+  '/css/style.css',
+  '/js/app.js',
   '/manifest.json'
 ];
 

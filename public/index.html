@@ -11,10 +11,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="UNIMIB Orari">
-  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
 
   <!-- CSS Styles -->
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
 
@@ -84,12 +84,12 @@
         <button id="btnCloseQrModal" class="btn-icon" style="width:30px; height:30px;">✕</button>
       </div>
       <p style="font-size:0.85rem; color:var(--text-secondary);">
-        Scansiona questo QR Code dalla fotocamera del tuo telefono per aprire subito l'applicazione sulla stessa rete Wi-Fi:
+        Apri questo indirizzo dal tuo smartphone o aggiungilo alla schermata Home:
       </p>
       <div class="qr-box">
         <img id="qrImage" src="" alt="QR Code">
       </div>
-      <div id="mobileUrlText" class="mobile-url-box">http://...</div>
+      <div id="mobileUrlText" class="mobile-url-box">https://unimib-calendar.vercel.app</div>
       <button id="btnCloseQrModal" class="btn-primary" onclick="document.getElementById('qrModal').classList.remove('active')">Chiudi</button>
     </div>
   </div>
@@ -98,6 +98,6 @@
   <div id="toastNotification" class="toast">Messaggio</div>
 
   <!-- JS Logic -->
-  <script src="/static/js/app.js"></script>
+  <script src="/js/app.js"></script>
 </body>
 </html>
