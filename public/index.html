@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>UNIMIB Magistrale Informatica - Orari</title>
+  <title>UNIMIB Orari</title>
 
   <!-- PWA Meta Tags -->
   <link rel="manifest" href="/manifest.json">
@@ -25,10 +25,11 @@
         <div class="app-logo">📅</div>
         <div>
           <h1>UNIMIB Orari</h1>
-          <p>2° Anno Magistrale Informatica</p>
+          <p id="headerSubtitle">Seleziona il tuo corso</p>
         </div>
       </div>
       <div class="header-actions">
+        <button id="btnSettings" class="btn-icon" title="Scegli corso di studio">⚙️</button>
         <button id="btnRefresh" class="btn-icon" title="Aggiorna Calendario">🔄</button>
         <button id="btnMobileInfo" class="btn-icon" title="Connetti Smartphone">📱</button>
       </div>
@@ -38,7 +39,7 @@
   <!-- Filter & Mode Selection -->
   <div class="filter-container">
     <div class="toggle-group">
-      <button id="btnFilterTarget" class="toggle-btn active">⭐ I Miei 3 Corsi</button>
+      <button id="btnFilterTarget" class="toggle-btn active">⭐ I Miei Corsi</button>
       <button id="btnFilterAll" class="toggle-btn">📚 Tutti i Corsi</button>
     </div>
 
@@ -91,6 +92,43 @@
       </div>
       <div id="mobileUrlText" class="mobile-url-box">https://unimib-calendar.vercel.app</div>
       <button id="btnCloseQrModal" class="btn-primary" onclick="document.getElementById('qrModal').classList.remove('active')">Chiudi</button>
+    </div>
+  </div>
+
+  <!-- Course of Study Setup Modal -->
+  <div id="setupModal" class="modal-overlay">
+    <div class="modal-content setup-content">
+      <div class="modal-header">
+        <h3>🎓 Il tuo corso di studio</h3>
+        <button id="btnCloseSetup" class="btn-icon" style="width:30px; height:30px;">✕</button>
+      </div>
+
+      <div class="form-field">
+        <label for="cfgYear">Anno accademico</label>
+        <select id="cfgYear"></select>
+      </div>
+      <div class="form-field">
+        <label for="cfgArea">Area didattica</label>
+        <select id="cfgArea" disabled></select>
+      </div>
+      <div class="form-field">
+        <label for="cfgCourse">Corso di studio</label>
+        <select id="cfgCourse" disabled></select>
+      </div>
+      <div class="form-field">
+        <label>Anno di studio</label>
+        <div id="cfgStudyYears" class="choice-list">
+          <p class="field-hint">Seleziona prima il corso di studio.</p>
+        </div>
+      </div>
+      <div class="form-field">
+        <label>⭐ I miei corsi <span class="field-hint">(opzionale)</span></label>
+        <div id="cfgFavorites" class="choice-list">
+          <p class="field-hint">Seleziona prima l'anno di studio.</p>
+        </div>
+      </div>
+
+      <button id="btnSaveSetup" class="btn-primary" disabled>Salva</button>
     </div>
   </div>
 

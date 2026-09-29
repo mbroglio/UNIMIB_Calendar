@@ -2,7 +2,11 @@
   "version": 2,
   "rewrites": [
     {
-      "source": "/api/(.*)",
+      "source": "/api/options",
+      "destination": "/api/options.py"
+    },
+    {
+      "source": "/api/calendar",
       "destination": "/api/calendar.py"
     }
   ]

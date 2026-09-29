@@ -1,7 +1,7 @@
 {
-  "name": "UNIMIB Orari Informatica Magistrale",
+  "name": "UNIMIB Orari",
   "short_name": "UNIMIB Orari",
-  "description": "Calendario 2° Anno Magistrale Informatica UNIMIB con focus su Architettura del Software, Reverse Eng, e Large Scale Data Management",
+  "description": "Orario delle lezioni UNIMIB per qualsiasi corso di studio e anno, con evidenziazione dei tuoi corsi",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0F172A",
