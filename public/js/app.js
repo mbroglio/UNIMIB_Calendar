@@ -1,40 +1,48 @@
 /**
- * UNIMIB Magistrale Informatica - Mobile Calendar App Logic
+ * UNIMIB Orari - Mobile Calendar App Logic
  */
+
+const CONFIG_KEY = 'unimib_config';
+const CALENDAR_CACHE_PREFIX = 'unimib_cal_';
+const FAVORITE_COLORS = ['#8B5CF6', '#10B981', '#06B6D4', '#F59E0B', '#EC4899', '#3B82F6', '#F97316', '#84CC16'];
 
 let state = {
   currentMonday: null,
-  activeFilter: 'target', // 'target' (the 3 courses) or 'all'
+  activeFilter: 'target', // 'target' (my courses) or 'all'
   selectedDayDate: 'all',  // 'all' or '28-09-2026'
   calendarData: null,
   searchQuery: '',
-  serverInfo: null
+  config: null,           // { anno, corso, corsoLabel, anni: [...], anniLabels: [...], favorites: [{code, label}] }
+  favoriteColors: {},     // course_code -> color
+  requestId: 0
 };
 
-// Target course configurations matching backend
-const COURSE_BADGES = {
-  'architettura_software': { badge: '📐 Arch. Software', class: 'architettura_software', cardClass: 'target-architettura_software' },
-  'reverse_engineering': { badge: '🔄 Evolution & Rev. Eng.', class: 'reverse_engineering', cardClass: 'target-reverse_engineering' },
-  'large_scale_data': { badge: '📊 Large Scale Data', class: 'large_scale_data', cardClass: 'target-large_scale_data' }
+// Options loaded from the UNIMIB dropdown data while the setup modal is open
+let setup = {
+  seq: 0,
+  courses: [],
+  teachings: []
 };
 
 document.addEventListener('DOMContentLoaded', () => {
   initApp();
 });
 
-async function initApp() {
+function initApp() {
   setupEventListeners();
   registerServiceWorker();
-  await fetchServerInfo();
-  
-  // Set initial Monday
-  if (state.serverInfo && state.serverInfo.current_monday) {
-    state.currentMonday = state.serverInfo.current_monday;
+  setupQrCode();
+
+  state.currentMonday = formatFormattedDate(getMonday(new Date()));
+  state.config = loadConfig();
+
+  if (state.config) {
+    applyConfig();
+    loadCalendar(state.currentMonday);
   } else {
-    state.currentMonday = formatFormattedDate(getMonday(new Date()));
+    showWelcome();
+    openSetup();
   }
-  
-  loadCalendar(state.currentMonday);
 }
 
 function registerServiceWorker() {
@@ -45,26 +53,10 @@ function registerServiceWorker() {
   }
 }
 
-async function fetchServerInfo() {
-  try {
-    const res = await fetch('/api/info');
-    if (res.ok) {
-      state.serverInfo = await res.json();
-      const mobileUrl = state.serverInfo.mobile_url || window.location.href;
-      document.getElementById('mobileUrlText').textContent = mobileUrl;
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(mobileUrl)}`;
-      document.getElementById('qrImage').src = qrUrl;
-    } else {
-      document.getElementById('mobileUrlText').textContent = window.location.href;
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(window.location.href)}`;
-      document.getElementById('qrImage').src = qrUrl;
-    }
-  } catch (err) {
-    console.warn('Could not fetch server info', err);
-    document.getElementById('mobileUrlText').textContent = window.location.href;
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(window.location.href)}`;
-    document.getElementById('qrImage').src = qrUrl;
-  }
+function setupQrCode() {
+  const mobileUrl = window.location.origin + '/';
+  document.getElementById('mobileUrlText').textContent = mobileUrl;
+  document.getElementById('qrImage').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(mobileUrl)}`;
 }
 
 function setupEventListeners() {
@@ -72,7 +64,7 @@ function setupEventListeners() {
   document.getElementById('btnFilterTarget').addEventListener('click', () => {
     setFilter('target');
   });
-  
+
   document.getElementById('btnFilterAll').addEventListener('click', () => {
     setFilter('all');
   });
@@ -81,11 +73,11 @@ function setupEventListeners() {
   document.getElementById('btnPrevWeek').addEventListener('click', () => {
     changeWeek(-7);
   });
-  
+
   document.getElementById('btnNextWeek').addEventListener('click', () => {
     changeWeek(7);
   });
-  
+
   document.getElementById('btnToday').addEventListener('click', () => {
     state.currentMonday = formatFormattedDate(getMonday(new Date()));
     state.selectedDayDate = 'all';
@@ -112,6 +104,18 @@ function setupEventListeners() {
 
   document.getElementById('btnCloseQrModal').addEventListener('click', () => {
     document.getElementById('qrModal').classList.remove('active');
+  });
+
+  // Course of study setup
+  document.getElementById('btnSettings').addEventListener('click', () => openSetup());
+  document.getElementById('btnCloseSetup').addEventListener('click', closeSetup);
+  document.getElementById('btnSaveSetup').addEventListener('click', saveSetup);
+  document.getElementById('cfgYear').addEventListener('change', () => onSetupYearChange({}));
+  document.getElementById('cfgArea').addEventListener('change', () => onSetupAreaChange({}));
+  document.getElementById('cfgCourse').addEventListener('change', () => onSetupCourseChange({}));
+  document.getElementById('cfgStudyYears').addEventListener('change', () => {
+    renderFavoriteChoices(getCheckedValues('cfgFavorites'));
+    updateSaveButton();
   });
 
   // Swipe support for mobile
@@ -142,6 +146,249 @@ function setupEventListeners() {
   }
 }
 
+// ---------- Configuration ----------
+
+function loadConfig() {
+  try {
+    const cfg = JSON.parse(localStorage.getItem(CONFIG_KEY));
+    if (cfg && cfg.anno && cfg.corso && Array.isArray(cfg.anni) && cfg.anni.length) return cfg;
+  } catch (e) {
+    console.warn('Config read error', e);
+  }
+  return null;
+}
+
+function saveConfig(cfg) {
+  try {
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+  } catch (e) {
+    console.warn('Config save error', e);
+  }
+}
+
+function configKey() {
+  const c = state.config;
+  return `${c.anno}_${c.corso}_${c.anni.join(',')}`;
+}
+
+function clearCalendarCache() {
+  try {
+    Object.keys(localStorage)
+      .filter(k => k.startsWith(CALENDAR_CACHE_PREFIX))
+      .forEach(k => localStorage.removeItem(k));
+  } catch (e) {
+    console.warn('Cache clear error', e);
+  }
+}
+
+function applyConfig() {
+  const cfg = state.config;
+  state.favoriteColors = {};
+  (cfg.favorites || []).forEach((f, i) => {
+    state.favoriteColors[f.code] = FAVORITE_COLORS[i % FAVORITE_COLORS.length];
+  });
+
+  document.getElementById('headerSubtitle').textContent = `${cfg.corsoLabel} · ${cfg.anniLabels.join(', ')}`;
+  setFilter(cfg.favorites && cfg.favorites.length ? 'target' : 'all');
+}
+
+// ---------- Setup modal (mirrors the UNIMIB "By degree" form dropdowns) ----------
+
+async function openSetup() {
+  document.getElementById('setupModal').classList.add('active');
+  document.getElementById('btnCloseSetup').style.display = state.config ? '' : 'none';
+
+  const preset = state.config || {};
+  const seq = ++setup.seq;
+  const yearSelect = document.getElementById('cfgYear');
+  fillSelect(yearSelect, [], 'Caricamento...');
+  resetSetupFrom('area');
+
+  try {
+    const data = await fetchJson('/api/options');
+    if (seq !== setup.seq) return;
+    const years = data.academic_years || [];
+    fillSelect(yearSelect, years, null);
+    if (preset.anno && years.some(y => y.value === preset.anno)) yearSelect.value = preset.anno;
+    await onSetupYearChange(preset);
+  } catch (err) {
+    console.error('Options fetch error:', err);
+    fillSelect(yearSelect, [], 'Errore di caricamento');
+    showToast('Impossibile caricare le opzioni da UNIMIB.');
+  }
+}
+
+function closeSetup() {
+  setup.seq++;
+  document.getElementById('setupModal').classList.remove('active');
+}
+
+async function onSetupYearChange(preset) {
+  const seq = ++setup.seq;
+  const areaSelect = document.getElementById('cfgArea');
+  resetSetupFrom('area');
+  fillSelect(areaSelect, [], 'Caricamento...');
+
+  try {
+    const data = await fetchJson(`/api/options?anno=${encodeURIComponent(document.getElementById('cfgYear').value)}`);
+    if (seq !== setup.seq) return;
+    setup.courses = data.courses || [];
+    fillSelect(areaSelect, data.areas || [], 'Seleziona area...');
+    if (preset.area && (data.areas || []).some(a => a.value === preset.area)) {
+      areaSelect.value = preset.area;
+      await onSetupAreaChange(preset);
+    }
+  } catch (err) {
+    console.error('Options fetch error:', err);
+    fillSelect(areaSelect, [], 'Errore di caricamento');
+    showToast('Impossibile caricare i corsi da UNIMIB.');
+  }
+}
+
+async function onSetupAreaChange(preset) {
+  setup.seq++;
+  resetSetupFrom('course');
+  const area = document.getElementById('cfgArea').value;
+  if (!area) return;
+
+  const courseSelect = document.getElementById('cfgCourse');
+  const courses = setup.courses
+    .filter(c => c.area === area)
+    .map(c => ({ value: c.value, label: `${c.value} - ${c.label}${c.type ? ` (${c.type})` : ''}` }));
+  fillSelect(courseSelect, courses, 'Seleziona corso...');
+
+  if (preset.corso && courses.some(c => c.value === preset.corso)) {
+    courseSelect.value = preset.corso;
+    await onSetupCourseChange(preset);
+  }
+}
+
+async function onSetupCourseChange(preset) {
+  const seq = ++setup.seq;
+  resetSetupFrom('studyYears');
+  const corso = document.getElementById('cfgCourse').value;
+  const course = setup.courses.find(c => c.value === corso);
+  if (!course) return;
+
+  // Year of study choices, grouped by year like the optgroups of the original form
+  const container = document.getElementById('cfgStudyYears');
+  const preselected = preset.anni || (course.years.length === 1 ? [course.years[0].value] : []);
+  let html = '';
+  let lastYear = null;
+  course.years.forEach(y => {
+    if (y.year !== lastYear) {
+      html += `<div class="choice-group-title">${/^\d+$/.test(y.year) ? `Anno ${escapeHtml(y.year)}` : escapeHtml(y.year)}</div>`;
+      lastYear = y.year;
+    }
+    html += choiceItemHtml(y.value, y.label, '', preselected.includes(y.value));
+  });
+  container.innerHTML = html || '<p class="field-hint">Nessun anno di studio disponibile.</p>';
+  updateSaveButton();
+
+  // Teachings of each year of study, used to pick "my courses"
+  document.getElementById('cfgFavorites').innerHTML = '<p class="field-hint">Caricamento...</p>';
+  try {
+    const anno = document.getElementById('cfgYear').value;
+    const data = await fetchJson(`/api/options?anno=${encodeURIComponent(anno)}&corso=${encodeURIComponent(corso)}`);
+    if (seq !== setup.seq) return;
+    setup.teachings = data.years || [];
+    renderFavoriteChoices((preset.favorites || []).map(f => f.code));
+  } catch (err) {
+    console.error('Teachings fetch error:', err);
+    document.getElementById('cfgFavorites').innerHTML = '<p class="field-hint">Impossibile caricare gli insegnamenti.</p>';
+  }
+}
+
+function renderFavoriteChoices(selectedCodes) {
+  const container = document.getElementById('cfgFavorites');
+  const anni = getCheckedValues('cfgStudyYears');
+  if (!anni.length) {
+    container.innerHTML = '<p class="field-hint">Seleziona prima l\'anno di studio.</p>';
+    return;
+  }
+
+  const seen = new Set();
+  let html = '';
+  setup.teachings
+    .filter(y => anni.includes(y.value))
+    .forEach(y => {
+      y.teachings.forEach(t => {
+        if (seen.has(t.code)) return;
+        seen.add(t.code);
+        html += choiceItemHtml(t.code, t.label, t.docente, selectedCodes.includes(t.code));
+      });
+    });
+  container.innerHTML = html || '<p class="field-hint">Nessun insegnamento disponibile.</p>';
+}
+
+function resetSetupFrom(level) {
+  setup.teachings = [];
+  if (level === 'area') fillSelect(document.getElementById('cfgArea'), [], '--');
+  if (level === 'area' || level === 'course') fillSelect(document.getElementById('cfgCourse'), [], '--');
+  document.getElementById('cfgStudyYears').innerHTML = '<p class="field-hint">Seleziona prima il corso di studio.</p>';
+  document.getElementById('cfgFavorites').innerHTML = '<p class="field-hint">Seleziona prima l\'anno di studio.</p>';
+  updateSaveButton();
+}
+
+function updateSaveButton() {
+  const ready = document.getElementById('cfgCourse').value && getCheckedValues('cfgStudyYears').length > 0;
+  document.getElementById('btnSaveSetup').disabled = !ready;
+}
+
+function saveSetup() {
+  const corso = document.getElementById('cfgCourse').value;
+  const course = setup.courses.find(c => c.value === corso);
+  const anni = getCheckedValues('cfgStudyYears');
+  if (!course || !anni.length) return;
+
+  const favoriteCodes = getCheckedValues('cfgFavorites');
+  const teachings = setup.teachings.flatMap(y => y.teachings);
+  const favorites = favoriteCodes.map(code => {
+    const t = teachings.find(x => x.code === code);
+    return { code, label: t ? t.label : code };
+  });
+
+  state.config = {
+    anno: document.getElementById('cfgYear').value,
+    area: document.getElementById('cfgArea').value,
+    corso,
+    corsoLabel: course.label,
+    anni,
+    anniLabels: anni.map(a => (course.years.find(y => y.value === a) || { label: a }).label),
+    favorites
+  };
+  saveConfig(state.config);
+  clearCalendarCache();
+
+  closeSetup();
+  applyConfig();
+  state.calendarData = null;
+  state.selectedDayDate = 'all';
+  loadCalendar(state.currentMonday);
+}
+
+function fillSelect(select, options, placeholder) {
+  select.innerHTML = '';
+  if (placeholder) select.appendChild(new Option(placeholder, ''));
+  options.forEach(o => select.appendChild(new Option(o.label, o.value)));
+  select.disabled = options.length === 0;
+}
+
+function choiceItemHtml(value, label, hint, checked) {
+  return `
+    <label class="choice-item">
+      <input type="checkbox" value="${escapeHtml(value)}" ${checked ? 'checked' : ''}>
+      <span>${escapeHtml(label)}${hint ? `<small>${escapeHtml(hint)}</small>` : ''}</span>
+    </label>
+  `;
+}
+
+function getCheckedValues(containerId) {
+  return Array.from(document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`)).map(i => i.value);
+}
+
+// ---------- Calendar ----------
+
 function setFilter(filterType) {
   state.activeFilter = filterType;
   document.getElementById('btnFilterTarget').classList.toggle('active', filterType === 'target');
@@ -154,7 +401,7 @@ function changeWeek(dayOffset) {
   const parts = state.currentMonday.split('-');
   const dt = new Date(parts[2], parts[1] - 1, parts[0]);
   dt.setDate(dt.getDate() + dayOffset);
-  
+
   // Ensure it's Monday
   const monday = getMonday(dt);
   state.currentMonday = formatFormattedDate(monday);
@@ -162,38 +409,56 @@ function changeWeek(dayOffset) {
   loadCalendar(state.currentMonday);
 }
 
+function calendarUrl(mondayDateStr, forceRefresh) {
+  const params = new URLSearchParams({ anno: state.config.anno, corso: state.config.corso, date: mondayDateStr });
+  state.config.anni.forEach(a => params.append('anno2', a));
+  if (forceRefresh) params.set('refresh', '1');
+  return `/api/calendar?${params}`;
+}
+
 async function loadCalendar(mondayDateStr, forceRefresh = false) {
+  if (!state.config) {
+    openSetup();
+    return;
+  }
+
+  const requestId = ++state.requestId;
   showLoading(true);
-  
+
   // Check LocalStorage cache for instant load
-  const cacheKey = `unimib_cal_${mondayDateStr}`;
+  const cacheKey = `${CALENDAR_CACHE_PREFIX}${configKey()}_${mondayDateStr}`;
   if (!forceRefresh) {
-    const localCache = localStorage.getItem(cacheKey);
-    if (localCache) {
-      try {
+    try {
+      const localCache = localStorage.getItem(cacheKey);
+      if (localCache) {
         state.calendarData = JSON.parse(localCache);
         renderCalendar();
         showLoading(false);
-      } catch (e) {
-        console.warn('Cache parse error', e);
       }
+    } catch (e) {
+      console.warn('Cache read error', e);
     }
   }
 
   try {
-    const url = `/api/calendar?date=${mondayDateStr}${forceRefresh ? '&refresh=1' : ''}`;
-    const res = await fetch(url);
+    const res = await fetch(calendarUrl(mondayDateStr, forceRefresh));
     if (!res.ok) throw new Error('Errore durante la risposta del server');
-    
+
     const data = await res.json();
+    if (requestId !== state.requestId) return;
     state.calendarData = data;
-    
+
     // Save to LocalStorage
-    localStorage.setItem(cacheKey, JSON.stringify(data));
-    
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify(data));
+    } catch (e) {
+      console.warn('Cache save error', e);
+    }
+
     renderCalendar();
     if (forceRefresh) showToast('Calendario aggiornato da UNIMIB!');
   } catch (err) {
+    if (requestId !== state.requestId) return;
     console.error('Fetch error:', err);
     if (!state.calendarData) {
       showError('Impossibile caricare il calendario. Verificare la connessione.');
@@ -201,16 +466,16 @@ async function loadCalendar(mondayDateStr, forceRefresh = false) {
       showToast('Visualizzazione offline dei dati salvati.');
     }
   } finally {
-    showLoading(false);
+    if (requestId === state.requestId) showLoading(false);
   }
 }
 
 function renderCalendar() {
   if (!state.calendarData) return;
-  
+
   // Update week header label
   document.getElementById('weekLabelText').textContent = state.calendarData.week_label || state.currentMonday;
-  
+
   renderDayTabs();
   renderEvents();
 }
@@ -218,9 +483,9 @@ function renderCalendar() {
 function renderDayTabs() {
   const tabsContainer = document.getElementById('daysTabBar');
   tabsContainer.innerHTML = '';
-  
+
   const giorni = state.calendarData.giorni || [];
-  
+
   // "Tutti" Tab
   const allTab = document.createElement('div');
   allTab.className = `day-tab ${state.selectedDayDate === 'all' ? 'active' : ''}`;
@@ -239,15 +504,15 @@ function renderDayTabs() {
     const tab = document.createElement('div');
     const isSelected = state.selectedDayDate === g.data;
     tab.className = `day-tab ${isSelected ? 'active' : ''}`;
-    
+
     // Short day name (lun, mar, mer...)
     const dayShort = g.label ? g.label.split(' ')[0].substring(0, 3).toUpperCase() : 'GG';
     const dayNum = g.data ? g.data.split('-')[0] : '';
-    
-    // Count target courses for this day
+
+    // Count my courses for this day
     const dayEvents = (state.calendarData.events || []).filter(e => e.date === g.data);
-    const targetCount = dayEvents.filter(e => e.is_target).length;
-    
+    const targetCount = dayEvents.filter(isFavorite).length;
+
     let dotsHtml = '';
     if (targetCount > 0) {
       dotsHtml = '<div class="tab-dots">';
@@ -258,32 +523,49 @@ function renderDayTabs() {
     }
 
     tab.innerHTML = `
-      <div class="tab-name">${dayShort}</div>
-      <div class="tab-date">${dayNum}</div>
+      <div class="tab-name">${escapeHtml(dayShort)}</div>
+      <div class="tab-date">${escapeHtml(dayNum)}</div>
       ${dotsHtml}
     `;
-    
+
     tab.addEventListener('click', () => {
       state.selectedDayDate = g.data;
       renderDayTabs();
       renderEvents();
     });
-    
+
     tabsContainer.appendChild(tab);
   });
+}
+
+function isFavorite(e) {
+  return Boolean(state.favoriteColors[e.course_code]);
 }
 
 function renderEvents() {
   const container = document.getElementById('eventsContainer');
   container.innerHTML = '';
-  
+
   if (!state.calendarData || !state.calendarData.events) return;
-  
+
+  const hasFavorites = state.config && state.config.favorites && state.config.favorites.length > 0;
+  if (state.activeFilter === 'target' && !hasFavorites) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">⭐</div>
+        <h3>Nessun corso preferito</h3>
+        <p>Scegli i tuoi corsi per vederli evidenziati e filtrati qui.</p>
+        <button class="btn-primary" style="margin-top:15px; width:auto;" onclick="openSetup()">Scegli i miei corsi</button>
+      </div>
+    `;
+    return;
+  }
+
   let events = state.calendarData.events;
 
-  // Filter 1: Target vs All
+  // Filter 1: My courses vs All
   if (state.activeFilter === 'target') {
-    events = events.filter(e => e.is_target);
+    events = events.filter(isFavorite);
   }
 
   // Filter 2: Specific Day
@@ -293,7 +575,7 @@ function renderEvents() {
 
   // Filter 3: Search Query
   if (state.searchQuery) {
-    events = events.filter(e => 
+    events = events.filter(e =>
       e.course.toLowerCase().includes(state.searchQuery) ||
       e.docente.toLowerCase().includes(state.searchQuery) ||
       e.aula.toLowerCase().includes(state.searchQuery)
@@ -305,7 +587,7 @@ function renderEvents() {
       <div class="empty-state">
         <div class="empty-icon">📅</div>
         <h3>Nessuna lezione trovata</h3>
-        <p>${state.activeFilter === 'target' ? 'Nessuna lezione dei 3 corsi in questo periodo.' : 'Nessuna lezione in programma per i filtri selezionati.'}</p>
+        <p>${state.activeFilter === 'target' ? 'Nessuna lezione dei tuoi corsi in questo periodo.' : 'Nessuna lezione in programma per i filtri selezionati.'}</p>
       </div>
     `;
     return;
@@ -324,47 +606,46 @@ function renderEvents() {
     grouped[e.date].items.push(e);
   });
 
+  // With several years of study selected, show which one each lesson belongs to
+  const showCurriculum = state.config.anni.length > 1;
+
   Object.keys(grouped).forEach(dateKey => {
     const group = grouped[dateKey];
     const section = document.createElement('div');
     section.className = 'day-section';
-    
-    section.innerHTML = `<div class="day-header-title">📌 ${group.dayName} ${group.date}</div>`;
-    
+
+    section.innerHTML = `<div class="day-header-title">📌 ${escapeHtml(group.dayName)} ${escapeHtml(group.date)}</div>`;
+
     group.items.forEach(e => {
       const card = document.createElement('div');
-      
-      let targetClass = '';
-      let badgeHtml = '';
-      
-      if (e.target_config) {
-        const key = e.target_config.id;
-        if (COURSE_BADGES[key]) {
-          targetClass = COURSE_BADGES[key].cardClass;
-          badgeHtml = `<span class="course-badge ${COURSE_BADGES[key].class}">${COURSE_BADGES[key].badge}</span>`;
-        }
-      }
-
+      const color = state.favoriteColors[e.course_code];
       const isCanceled = e.is_canceled;
-      if (isCanceled) card.classList.add('canceled');
-      if (targetClass) card.classList.add(targetClass);
-      
-      card.className = `event-card ${targetClass} ${isCanceled ? 'canceled' : ''}`;
-      
+
+      card.className = `event-card ${color ? 'target' : ''} ${isCanceled ? 'canceled' : ''}`;
+      if (color) card.style.setProperty('--course-color', color);
+
+      const curriculum = state.config.anniLabels
+        .filter(label => (e.curricula || []).some(c => c.endsWith(label)))
+        .join(', ');
+
       card.innerHTML = `
         <div class="card-top">
-          <span class="time-badge">⏰ ${e.start_time} - ${e.end_time}</span>
-          ${badgeHtml}
+          <span class="time-badge">⏰ ${escapeHtml(e.start_time)} - ${escapeHtml(e.end_time)}</span>
+          ${color ? '<span class="course-badge">⭐ Mio corso</span>' : ''}
         </div>
         ${isCanceled ? '<div class="canceled-banner">⚠️ LEZIONE ANNULLATA</div>' : ''}
-        <div class="course-title ${isCanceled ? 'canceled-text' : ''}">${e.course}</div>
+        <div class="course-title ${isCanceled ? 'canceled-text' : ''}">${escapeHtml(e.course)}</div>
         <div class="card-details">
           <div class="detail-item">
-            <span>📍</span> <span>Aula: <strong class="room-pill">${e.aula || 'Non specificata'}</strong></span>
+            <span>📍</span> <span>Aula: <strong class="room-pill">${escapeHtml(e.aula || 'Non specificata')}</strong></span>
           </div>
           <div class="detail-item">
-            <span>👨‍🏫</span> <span>Docente: <strong>${e.docente || 'Non specificato'}</strong></span>
+            <span>👨‍🏫</span> <span>Docente: <strong>${escapeHtml(e.docente || 'Non specificato')}</strong></span>
           </div>
+          ${showCurriculum && curriculum ? `
+          <div class="detail-item">
+            <span>🎓</span> <span>${escapeHtml(curriculum)}</span>
+          </div>` : ''}
         </div>
       `;
 
@@ -385,6 +666,19 @@ function showLoading(show) {
     spinnerContainer.style.display = 'none';
     eventsContainer.style.display = 'flex';
   }
+}
+
+function showWelcome() {
+  showLoading(false);
+  document.getElementById('weekLabelText').textContent = '—';
+  document.getElementById('eventsContainer').innerHTML = `
+    <div class="empty-state">
+      <div class="empty-icon">🎓</div>
+      <h3>Benvenuto!</h3>
+      <p>Scegli anno accademico, area didattica, corso e anno di studio per vedere il tuo orario.</p>
+      <button class="btn-primary" style="margin-top:15px; width:auto;" onclick="openSetup()">Scegli il corso</button>
+    </div>
+  `;
 }
 
 function showError(msg) {
@@ -409,6 +703,21 @@ function showToast(msg) {
 }
 
 // Helpers
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function getMonday(d) {
   d = new Date(d);
   const day = d.getDay();

@@ -1,6 +1,6 @@
-# 📅 UNIMIB Computer Science Master's Timetable App
+# 📅 UNIMIB Timetable App
 
-A modern, mobile-first Web Application and Progressive Web App (PWA) designed to scrape and display the weekly course timetable for the **2nd Year Master's Degree in Computer Science (Laurea Magistrale in Informatica)** at the **University of Milano-Bicocca (UNIMIB)**.
+A modern, mobile-first Web Application and Progressive Web App (PWA) designed to scrape and display the weekly course timetable of **any degree programme and year of study** at the **University of Milano-Bicocca (UNIMIB)**.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
@@ -10,10 +10,8 @@ A modern, mobile-first Web Application and Progressive Web App (PWA) designed to
 
 ## ✨ Features
 
-- **⭐ Target Courses Highlight**: Instant visual emphasis and custom color-coded badges for key 2nd-year courses:
-  - 🟣 **Software Architecture** (*Architettura del Software*)
-  - 🟢 **Evolution of Software Systems and Reverse Engineering**
-  - 0️⃣ **Large Scale Data Management**
+- **🎓 Any Course of Study**: On first launch (and anytime via ⚙️) pick *academic year*, *didactic area*, *course of study* and one or more *years of study* (e.g. "2 - PERCORSO COMUNE", "2 - T1 - Monza e Teledidattica"). All choices are loaded live from the same data that feeds the dropdowns of the [official "By degree" form](https://gestioneorari.didattica.unimib.it/PortaleStudentiUnimib/index.php?view=easycourse&_lang=en&include=corso) (`combo.php`), so new years and courses appear automatically.
+- **⭐ My Courses Highlight**: Choose your own courses (teachings) from the selected years to get color-coded cards and a dedicated "I Miei Corsi" filter.
 - **🔄 Live Dynamic Scraping**: Interrogates the official UNIMIB EasyCourse API (`grid_call.php`) on demand for any selected week.
 - **📱 Mobile-First Glassmorphism UI**: Beautiful, dark-themed responsive interface optimized for smartphone screens with PWA support ("Add to Home Screen" on iOS & Android).
 - **👆 Touch Gestures**: Swipe left or right on mobile devices to easily navigate between weeks or days.
@@ -38,7 +36,8 @@ A modern, mobile-first Web Application and Progressive Web App (PWA) designed to
 ```
 .
 ├── api/
-│   └── calendar.py         # Vercel Serverless Scraper Function
+│   ├── calendar.py         # Weekly timetable scraper (grid_call.php)
+│   └── options.py          # Dropdown data: academic years, areas, courses, years of study (combo.php)
 ├── public/
 │   ├── css/
 │   │   └── style.css       # Glassmorphism UI styles
@@ -52,6 +51,17 @@ A modern, mobile-first Web Application and Progressive Web App (PWA) designed to
 ├── .gitignore
 └── README.md
 ```
+
+---
+
+## 🔌 API
+
+| Endpoint | Returns |
+| --- | --- |
+| `GET /api/options` | Academic years |
+| `GET /api/options?anno=2026` | Didactic areas and courses of study, each with its years of study |
+| `GET /api/options?anno=2026&corso=F1802Q` | Years of study of a course with their teachings |
+| `GET /api/calendar?anno=2026&corso=F1802Q&anno2=GGG\|1&anno2=GGG\|2&date=29-09-2026` | Lessons of the week containing `date` for the selected years of study (`anno2` is repeatable) |
 
 ---
 
