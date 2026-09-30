@@ -654,3 +654,41 @@ body {
 .toast.show {
   transform: translateX(-50%) translateY(0);
 }
+
+/* App Footer / Credits */
+.app-footer {
+  text-align: center;
+  padding: 24px 16px 36px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  border-top: 1px solid var(--border-color);
+  margin-top: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-footer a {
+  color: var(--accent-cyan);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.2s ease;
+}
+
+.app-footer a:hover {
+  color: #FFF;
+  text-decoration: underline;
+}
+
+.footer-github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary) !important;
+}
+
+.footer-github-link:hover {
+  color: #FFF !important;
+}
+
