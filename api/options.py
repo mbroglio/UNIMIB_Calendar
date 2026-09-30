@@ -77,6 +77,9 @@ def get_course_teachings(anno, corso):
     if course is None:
         return None
     return {
+        "label": course["label"],
+        "type": course.get("tipo", ""),
+        "area": course.get("scuola") or "altri_corsi",
         "years": [
             {
                 "value": a["valore"],

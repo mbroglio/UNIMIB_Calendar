@@ -1,4 +1,4 @@
-const CACHE_NAME = 'unimib-calendar-v2';
+const CACHE_NAME = 'unimib-calendar-v3';
 const ASSETS = [
   '/',
   '/css/style.css',
@@ -45,9 +45,9 @@ self.addEventListener('fetch', (event) => {
         .catch(() => caches.match(event.request))
     );
   } else {
-    // Cache first for static assets
+    // Cache first for static assets (shared links like /?anno=... reuse the cached page)
     event.respondWith(
-      caches.match(event.request).then((cached) => {
+      caches.match(event.request, { ignoreSearch: event.request.mode === 'navigate' }).then((cached) => {
         return cached || fetch(event.request);
       })
     );
