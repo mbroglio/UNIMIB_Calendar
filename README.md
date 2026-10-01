@@ -1,34 +1,56 @@
-# 📅 UNIMIB Timetable App
+# 📅 UNIMIB Timetable & Campus Companion
 
-A modern, mobile-first Web Application and Progressive Web App (PWA) designed to scrape and display the weekly course timetable of **any degree programme and year of study** at the **University of Milano-Bicocca (UNIMIB)**.
+A modern, mobile-first Progressive Web App (PWA) designed for students at the **University of Milano-Bicocca (UNIMIB)**. View your weekly lecture timetable, track live classroom occupancy, inspect exam sessions, and share a synchronized schedule with friends.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![PWA Ready](https://img.shields.io/badge/PWA-Ready-success)
+![Vercel Deployed](https://img.shields.io/badge/Vercel-Production-black?logo=vercel)
 
 ---
 
 ## ✨ Features
 
-- **🎓 Any Course of Study**: On first launch (and anytime via ⚙️) pick *academic year*, *didactic area*, *course of study* and one or more *years of study* (e.g. "2 - PERCORSO COMUNE", "2 - T1 - Monza e Teledidattica"). All choices are loaded live from the same data that feeds the dropdowns of the [official "By degree" form](https://gestioneorari.didattica.unimib.it/PortaleStudentiUnimib/index.php?view=easycourse&_lang=en&include=corso) (`combo.php`), so new years and courses appear automatically.
-- **⭐ My Courses Highlight**: Choose your own courses (teachings) from the selected years to get color-coded cards and a dedicated "I Miei Corsi" filter.
-- **🔗 Share Link**: Tap 🔗 to get a readable link (plus QR code) to your configuration, e.g. `/?anno=2026&corso=F1801Q&anno2=GGG%7C2&fav=EC523651,EC523669`. Whoever opens it sees that timetable in preview mode, without saving anything, and can then **import** it or **exit** back to their own. `anno2` is repeatable and `fav` lists the teaching codes; labels are looked up again, so no server-side storage is needed.
-- **🔄 Live Dynamic Scraping**: Interrogates the official UNIMIB EasyCourse API (`grid_call.php`) on demand for any selected week.
-- **📱 Mobile-First Glassmorphism UI**: Beautiful, dark-themed responsive interface optimized for smartphone screens with PWA support ("Add to Home Screen" on iOS & Android).
-- **👆 Touch Gestures**: Swipe left or right on mobile devices to easily navigate between weeks or days.
-- **🔍 Instant Live Search**: Filter classes in real-time by course title, professor, or room location.
-- **⚠️ Class Cancellation Alerts**: Visually flags canceled or modified lectures in red.
-- **⚡ Offline Caching**: Caches schedule data locally in the browser (LocalStorage & Service Worker) for instant loading even with slow internet connections.
-- **☁️ Serverless & Cloud Ready**: Out-of-the-box configuration for instant 1-click deployment on **Vercel**, **Render**, or **PythonAnywhere**.
+### 1. 📅 Lecture Timetable (Orario Lezioni)
+- **🎓 Any Degree Programme**: Choose academic year, didactic area, degree course, and study years (e.g. "1 - Percorso comune"). Choices are fetched live from UNIMIB's official EasyCourse system (`combo.php`), automatically supporting new curricula.
+- **⭐ My Courses Filter (I Miei Corsi)**: Select the specific teachings you follow to get distinct color badges and filter the view to display only your active courses.
+- **👆 Mobile Gestures & Daily View**: Swipe or toggle between full weekly overview or day-by-day timetable.
+- **🔍 Real-Time Search**: Instant live filtering by subject name, professor, or classroom.
+- **⚠️ Cancellation Notices**: Automatically highlights canceled lectures or last-minute changes in red.
+- **🔗 Share Link & QR Code**: Generate a link or QR code containing your course configuration for instant preview and one-tap import.
+
+### 2. 🏛️ Classroom Occupancy (Occupazione Aule)
+- **🏢 All Campus Buildings**: Real-time room status for all UNIMIB buildings (U01 through U28).
+- **🟢 Status at a Glance**: Instant visual badges indicating whether a room is **Libera** (Free) or **Occupata** (Occupied), including how long it remains free or occupied.
+- **⏰ Time Slots & Date Picker**: Check occupancy right now or inspect specific time blocks (09:00, 11:00, 13:00, 14:30, 16:30) for any date.
+- **📋 Full Daily Schedule**: Tap any classroom to view the complete chronological list of lectures held in that room for the selected day.
+
+### 3. 📝 Exam Calendar (Calendario Esami)
+- **🎓 Monitored Courses**: Automatically imports exam dates for your degree and allows adding extra courses from any didactic area.
+- **⭐ Personalized Exam Filter**: Switch between **"📚 Tutti gli Appelli"** (all exams for the degree) and **"⭐ I Miei Corsi"** (only exams matching the teachings you actually attend).
+- **🗓️ Session Filters**: Quick presets for Winter (*Invernale*), Summer (*Estiva*), Autumn (*Autunnale*), or Custom Date Range.
+- **📅 Add to Calendar (.ics)**: Download an `.ics` file for any exam appeal to import it directly into Apple Calendar, Google Calendar, or Outlook.
+
+### 4. 👤 Cloud Profile & Synchronisation (No Complex Passwords)
+- **🔑 Memorable Auth (Nickname + PIN)**: No email or password needed. Create a profile with your chosen **Soprannome** (e.g. `Mario`) and a 4-digit **PIN** (e.g. `1234`).
+- **📱 Multi-Device Sync**: Log in on any device (iPhone, laptop, tablet) simply by entering your Soprannome and PIN. Your study plan, favorite courses, and monitored exams sync automatically.
+- **⚡ First-Visit Onboarding**: First-time visitors can choose to create a profile, log in to restore an existing plan, or **Continua come ospite** (Guest mode) to start immediately without registration.
+- **☁️ Serverless Storage**: Backed by **Upstash Redis REST API**, salted with SHA-256 for secure PIN verification.
+
+### 5. 👥 Friends Shared Calendar (Calendario Amici)
+- **🤝 Compare Timetables**: See your schedule and your friends' schedules combined on a single weekly calendar with distinct color-coded badges to easily spot common free hours and overlapping classes.
+- **➕ Easy Friend Discovery**: Add friends using their memorable identifier (e.g. `mario1234`) or search them by nickname.
+- **🔗 One-Tap Group Link**: Click **🔗 Condividi** to generate a link (e.g. `/?group=mario1234,luca5678`). When friends open the link, the entire group is automatically loaded into their Friends tab.
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **Frontend**: HTML5, Modern CSS3 (Glassmorphism, Flexbox/Grid), ES6 JavaScript.
-- **Backend / Scraper**: Python (Scraping engine using `urllib` & standard library `json`).
-- **PWA**: Service Worker (`sw.js`) and Web App Manifest (`manifest.json`).
-- **Deployment**: Vercel Serverless Functions configuration (`vercel.json`).
+- **Frontend**: Vanilla ES6+ JavaScript, Responsive CSS3 (Glassmorphism, Mobile-First, iOS Safe Area support).
+- **PWA**: Service Worker cache strategy (`sw.js`) and Web App Manifest (`manifest.json`) for native-like installation on iOS & Android.
+- **Backend / Scrapers**: Python serverless functions (standard library `urllib` & `json`, zero external dependencies).
+- **Database**: Upstash Redis (Serverless REST API) for profile preferences and friend indices.
+- **Hosting & CI/CD**: Vercel Serverless Functions.
 
 ---
 
@@ -38,59 +60,51 @@ A modern, mobile-first Web Application and Progressive Web App (PWA) designed to
 .
 ├── api/
 │   ├── calendar.py         # Weekly timetable scraper (grid_call.php)
-│   └── options.py          # Dropdown data: academic years, areas, courses, years of study (combo.php)
+│   ├── exams.py            # Exam appeals scraper (bookings_call.php)
+│   ├── options.py          # Degree dropdown data (combo.php)
+│   ├── profile.py          # Profile management & PIN authentication (Upstash Redis)
+│   ├── rooms.py            # Live classroom occupancy scraper
+│   └── shared_calendar.py  # Combined multi-student timetable generator
 ├── public/
 │   ├── css/
-│   │   └── style.css       # Glassmorphism UI styles
+│   │   └── style.css       # Responsive dark-theme & glassmorphism styles
 │   ├── js/
-│   │   ├── app.js          # App logic, state management & touch handlers
-│   │   └── sw.js           # PWA Service Worker
-│   ├── icons/              # App icons (192x192, 512x512)
-│   ├── index.html          # Main SPA template
-│   └── manifest.json       # PWA Web App Manifest
-├── vercel.json             # Vercel routing configuration
+│   │   ├── app.js          # Main SPA application logic & state management
+│   │   └── sw.js           # PWA Service Worker (offline cache)
+│   ├── icons/              # App icons for iOS / Android home screens
+│   ├── index.html          # Single Page Application HTML template
+│   └── manifest.json       # Web App Manifest
+├── vercel.json             # Vercel serverless rewrites and routing
 ├── .gitignore
 └── README.md
 ```
 
 ---
 
-## 🔌 API
+## 🔌 API Endpoints
 
-| Endpoint | Returns |
-| --- | --- |
-| `GET /api/options` | Academic years |
-| `GET /api/options?anno=2026` | Didactic areas and courses of study, each with its years of study |
-| `GET /api/options?anno=2026&corso=F1802Q` | Label, type and area of a course, plus its years of study with their teachings |
-| `GET /api/calendar?anno=2026&corso=F1802Q&anno2=GGG\|1&anno2=GGG\|2&date=29-09-2026` | Lessons of the week containing `date` for the selected years of study (`anno2` is repeatable) |
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/options` | Returns academic years, didactic areas, degree courses, and study years |
+| `GET` | `/api/calendar` | Returns lessons for selected degree course and study years for a given week |
+| `GET` | `/api/rooms` | Returns real-time room occupancy and daily schedule for a campus building |
+| `GET` | `/api/exams` | Returns upcoming exam appeals filtered by degree courses, years, and date range |
+| `POST` | `/api/profile` | Creates a new student profile (`{ nickname, pin, config, exam_courses }`) |
+| `GET` | `/api/profile?id=<ID>` | Fetches public profile configuration by ID (`<nickname><pin>`) |
+| `GET` | `/api/profile?lookup=<NAME>` | Searches profiles by nickname |
+| `PUT` | `/api/profile?id=<ID>` | Updates profile configuration (requires PIN in body) |
+| `GET` | `/api/shared_calendar?ids=ID1,ID2` | Returns merged weekly timetable for multiple student profiles |
 
 ---
 
-## 🚀 Deployment Instructions
+## 🚀 Environment Variables (Vercel)
 
-### Option 1: Deploy to Vercel (Recommended)
+To enable the cloud profile and shared friends calendar, configure the following environment variables in your Vercel project (**Settings** → **Environment Variables**):
 
-1. Sign in to [Vercel](https://vercel.com).
-2. Click **Add New Project** and select this repository (`UNIMIB_Calendar`).
-3. Click **Deploy**.
-4. Open the generated live URL (e.g., `https://your-app.vercel.app`) on your smartphone and select **Add to Home Screen**!
-
-### Option 2: Local Development (Python Flask)
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/mbroglio/UNIMIB_Calendar.git
-   cd UNIMIB_Calendar
-   ```
-2. Install dependencies:
-   ```bash
-   pip install flask
-   ```
-3. Run the application:
-   ```bash
-   python app.py
-   ```
-4. Access the app in your browser at `http://localhost:5000` or on your mobile device on the local network (`http://<YOUR_LOCAL_IP>:5000`).
+| Variable | Description |
+| :--- | :--- |
+| `UPSTASH_REDIS_REST_URL` | Upstash Redis REST endpoint URL |
+| `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST bearer token |
 
 ---
 
