@@ -31,6 +31,7 @@
         </div>
       </div>
       <div class="header-actions">
+        <button id="btnProfile" class="btn-icon" title="Il tuo profilo">👤</button>
         <button id="btnSettings" class="btn-icon" title="Scegli corso di studio">⚙️</button>
         <button id="btnRefresh" class="btn-icon" title="Aggiorna Calendario">🔄</button>
         <button id="btnShare" class="btn-icon" title="Condividi orario">🔗</button>
@@ -249,6 +250,57 @@
     </div>
   </section>
 
+  <!-- 4. Friends / Shared Calendar View -->
+  <section id="viewFriends" class="app-view hidden">
+    <div class="control-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <div>
+          <h3 style="font-size:1rem; color:var(--text-primary); margin:0 0 2px;">👥 Calendario Amici</h3>
+          <p style="font-size:0.78rem; color:var(--text-secondary); margin:0;">Inserisci i codici dei tuoi amici per vedere i vostri orari combinati</p>
+        </div>
+        <button id="btnAddFriend" class="btn-primary" style="width:auto; padding:8px 14px; font-size:0.82rem; white-space:nowrap;">+ Aggiungi</button>
+      </div>
+
+      <!-- Friend chips list -->
+      <div id="friendChips" class="exam-courses-bar" style="margin-bottom:12px; min-height:36px;">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Week navigation for shared calendar -->
+      <div class="week-navigator" style="margin-top:0;">
+        <button id="btnFriendsPrevWeek" class="week-nav-btn">◀ Prev</button>
+        <div class="week-label">
+          <div id="friendsWeekLabel" class="date-range">Seleziona la settimana</div>
+          <span id="btnFriendsToday" class="badge-status" style="cursor:pointer;">Questa Settimana</span>
+        </div>
+        <button id="btnFriendsNextWeek" class="week-nav-btn">Next ▶</button>
+      </div>
+    </div>
+
+    <!-- Profile legend -->
+    <div id="friendsLegend" style="display:none; padding:12px 16px; background:rgba(255,255,255,0.04); border-radius:12px; margin-bottom:10px; display:flex; flex-wrap:wrap; gap:8px;">
+      <!-- Rendered dynamically -->
+    </div>
+
+    <!-- Spinner -->
+    <div id="friendsSpinnerContainer" class="spinner-container" style="display:none;">
+      <div class="spinner"></div>
+      <p style="font-size:0.85rem; color:var(--text-secondary);">Caricamento orari in corso...</p>
+    </div>
+
+    <!-- Empty state -->
+    <div id="friendsEmptyState" style="text-align:center; padding:40px 20px; display:none;">
+      <div style="font-size:2.5rem; margin-bottom:12px;">👥</div>
+      <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:8px;">Nessun amico aggiunto</p>
+      <p style="color:var(--text-muted); font-size:0.8rem;">Aggiungi i codici dei tuoi amici per vedere i vostri orari combinati e trovare i momenti liberi in comune.</p>
+    </div>
+
+    <!-- Shared events container -->
+    <div id="friendsEventsContainer" class="events-container" style="display:none;">
+      <!-- Rendered dynamically -->
+    </div>
+  </section>
+
   <!-- App Footer / Credits -->
   <footer class="app-footer">
     <p>Sviluppato da <a href="https://github.com/mbroglio" target="_blank" rel="noopener noreferrer">Matteo Broglio</a></p>
@@ -390,10 +442,150 @@
       <span class="nav-icon">📝</span>
       <span class="nav-label">Esami</span>
     </button>
+    <button id="tabFriends" class="nav-tab">
+      <span class="nav-icon">👥</span>
+      <span class="nav-label">Amici</span>
+    </button>
   </nav>
 
   <!-- Notification Toast -->
   <div id="toastNotification" class="toast">Messaggio</div>
+
+  <!-- Profile Modal -->
+  <div id="profileModal" class="modal-overlay">
+    <div class="modal-content setup-content" style="max-width: 440px;">
+      <div class="modal-header">
+        <h3>👤 Il tuo profilo</h3>
+        <button id="btnCloseProfile" class="btn-icon" style="width:30px; height:30px;">✕</button>
+      </div>
+
+      <!-- Not logged in state -->
+      <div id="profileLoggedOut">
+        <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:16px;">
+          Crea il tuo profilo per sincronizzare il piano di studi su più dispositivi e condividere il calendario con gli amici.
+        </p>
+
+        <!-- Tabs: Crea / Accedi -->
+        <div class="toggle-group" style="margin-bottom:16px;">
+          <button id="profileTabCreate" class="toggle-btn active" onclick="showProfileTab('create')">✨ Crea profilo</button>
+          <button id="profileTabLogin" class="toggle-btn" onclick="showProfileTab('login')">🔑 Accedi</button>
+        </div>
+
+        <!-- Create Form -->
+        <div id="profileCreateForm">
+          <div class="form-field">
+            <label for="profileNickname">Soprannome <span class="field-hint">(come ti vedranno gli amici)</span></label>
+            <input type="text" id="profileNickname" placeholder="es. Mario, Ele, Prof..." maxlength="30"
+                   style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:0.9rem; outline:none;">
+          </div>
+          <div class="form-field">
+            <label for="profilePin">PIN <span class="field-hint">(4-8 cifre, da usare per accedere su altri dispositivi)</span></label>
+            <input type="password" id="profilePin" placeholder="••••" maxlength="8" inputmode="numeric" pattern="[0-9]*"
+                   style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:0.9rem; outline:none; letter-spacing:0.2em;">
+          </div>
+          <div class="form-field">
+            <label for="profilePinConfirm">Conferma PIN</label>
+            <input type="password" id="profilePinConfirm" placeholder="••••" maxlength="8" inputmode="numeric" pattern="[0-9]*"
+                   style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:0.9rem; outline:none; letter-spacing:0.2em;">
+          </div>
+          <p id="profileCreateError" style="color:#EF4444; font-size:0.8rem; display:none; margin-bottom:8px;"></p>
+          <button id="btnCreateProfile" class="btn-primary" style="width:100%; margin-top:4px;">Crea profilo</button>
+        </div>
+
+        <!-- Login Form -->
+        <div id="profileLoginForm" style="display:none;">
+          <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:12px;">Inserisci il tuo Codice Calendario e il PIN per accedere.</p>
+          <div class="form-field">
+            <label for="profileLoginId">Codice Calendario <span class="field-hint">(8 caratteri, es. AB12CD34)</span></label>
+            <input type="text" id="profileLoginId" placeholder="AB12CD34" maxlength="8"
+                   style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:0.9rem; outline:none; text-transform:uppercase; letter-spacing:0.15em; font-family:monospace;">
+          </div>
+          <div class="form-field">
+            <label for="profileLoginPin">PIN</label>
+            <input type="password" id="profileLoginPin" placeholder="••••" maxlength="8" inputmode="numeric"
+                   style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:0.9rem; outline:none; letter-spacing:0.2em;">
+          </div>
+          <p id="profileLoginError" style="color:#EF4444; font-size:0.8rem; display:none; margin-bottom:8px;"></p>
+          <button id="btnLoginProfile" class="btn-primary" style="width:100%; margin-top:4px;">Accedi</button>
+        </div>
+      </div>
+
+      <!-- Logged in state -->
+      <div id="profileLoggedIn" style="display:none;">
+        <div class="profile-id-box">
+          <div>
+            <span class="profile-nickname" id="profileDisplayNickname">Mario</span>
+            <span style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-top:2px;">Il tuo Codice Calendario:</span>
+            <span class="profile-id-code" id="profileDisplayId">AB12CD34</span>
+          </div>
+          <button id="btnCopyProfileId" class="btn-secondary" style="width:auto; padding:6px 10px; font-size:0.78rem;" title="Copia codice">📋</button>
+        </div>
+
+        <p style="font-size:0.8rem; color:var(--text-muted); margin:10px 0 16px;">
+          Condividi questo codice con i tuoi amici: potranno aggiungerti al loro Calendario Amici per vedere il tuo orario.
+        </p>
+
+        <!-- Sync status -->
+        <div id="profileSyncStatus" class="profile-sync-row" style="margin-bottom:12px;">
+          <span id="profileSyncIcon">✅</span>
+          <span id="profileSyncText" style="font-size:0.82rem; color:var(--text-secondary);">Profilo sincronizzato</span>
+          <button id="btnSyncNow" class="btn-secondary" style="width:auto; padding:4px 10px; font-size:0.75rem; margin-left:auto;">🔄 Sincronizza</button>
+        </div>
+
+        <hr style="border-color:rgba(255,255,255,0.08); margin-bottom:12px;">
+
+        <button id="btnLogoutProfile" class="btn-secondary" style="width:100%; font-size:0.85rem;">🚪 Esci dal profilo</button>
+        <p style="font-size:0.72rem; color:var(--text-muted); margin-top:8px; text-align:center;">Le tue impostazioni rimangono salvate localmente sul dispositivo.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Add Friend Modal -->
+  <div id="addFriendModal" class="modal-overlay">
+    <div class="modal-content setup-content" style="max-width:400px;">
+      <div class="modal-header">
+        <h3>➕ Aggiungi un amico</h3>
+        <button id="btnCloseAddFriend" class="btn-icon" style="width:30px; height:30px;">✕</button>
+      </div>
+
+      <div class="toggle-group" style="margin-bottom:16px;">
+        <button id="friendTabCode" class="toggle-btn active" onclick="showFriendTab('code')">🔑 Codice</button>
+        <button id="friendTabName" class="toggle-btn" onclick="showFriendTab('name')">🔍 Soprannome</button>
+      </div>
+
+      <!-- By code -->
+      <div id="friendByCode">
+        <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:12px;">Inserisci il Codice Calendario del tuo amico (8 caratteri).</p>
+        <div class="form-field">
+          <label for="friendCodeInput">Codice Calendario</label>
+          <input type="text" id="friendCodeInput" placeholder="AB12CD34" maxlength="8"
+                 style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:0.9rem; outline:none; text-transform:uppercase; letter-spacing:0.15em; font-family:monospace;">
+        </div>
+        <div id="friendCodePreview" style="display:none; background:rgba(255,255,255,0.05); border-radius:10px; padding:10px 14px; margin-bottom:10px;">
+          <span id="friendCodePreviewNick" style="font-weight:700; color:var(--text-primary);"></span>
+          <span style="font-size:0.75rem; color:var(--text-muted); margin-left:6px;">trovato!</span>
+        </div>
+        <p id="friendCodeError" style="color:#EF4444; font-size:0.8rem; display:none; margin-bottom:8px;"></p>
+        <button id="btnLookupFriendCode" class="btn-secondary" style="width:100%; margin-bottom:8px;">🔍 Cerca</button>
+        <button id="btnConfirmAddFriendCode" class="btn-primary" style="width:100%;" disabled>+ Aggiungi al calendario</button>
+      </div>
+
+      <!-- By nickname -->
+      <div id="friendByName" style="display:none;">
+        <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:12px;">Cerca per soprannome. Se più persone hanno lo stesso soprannome, vedrai tutte le opzioni.</p>
+        <div class="form-field">
+          <label for="friendNameInput">Soprannome</label>
+          <input type="text" id="friendNameInput" placeholder="es. Mario" maxlength="30"
+                 style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:0.9rem; outline:none;">
+        </div>
+        <button id="btnSearchFriendName" class="btn-secondary" style="width:100%; margin-bottom:10px;">🔍 Cerca</button>
+        <div id="friendNameResults" style="display:none; max-height:180px; overflow-y:auto;">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- JS Logic -->
   <script src="/js/app.js"></script>

@@ -16,6 +16,14 @@
     {
       "source": "/api/exams",
       "destination": "/api/exams.py"
+    },
+    {
+      "source": "/api/profile",
+      "destination": "/api/profile.py"
+    },
+    {
+      "source": "/api/shared_calendar",
+      "destination": "/api/shared_calendar.py"
     }
   ]
 }

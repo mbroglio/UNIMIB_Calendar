@@ -1371,3 +1371,208 @@ body {
 }
 
 
+
+/* ──────────────────────────────────────────────────────────────
+   Profile & Shared Calendar Styles
+   ────────────────────────────────────────────────────────────── */
+
+/* Profile ID box (shown when logged in) */
+.profile-id-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+}
+
+.profile-nickname {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.profile-id-code {
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  color: var(--accent-purple);
+  letter-spacing: 0.18em;
+  display: block;
+  margin-top: 4px;
+}
+
+.profile-sync-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+/* Profile header indicator (small badge shown in header when logged in) */
+.btn-icon.profile-active {
+  position: relative;
+}
+
+.btn-icon.profile-active::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  background: var(--accent-green);
+  border-radius: 50%;
+  border: 2px solid var(--bg-primary);
+}
+
+/* ── Friends View ── */
+.friend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 6px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.friend-chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.friend-chip-remove {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 0.75rem;
+  line-height: 1;
+  transition: color 0.2s;
+  flex-shrink: 0;
+}
+
+.friend-chip-remove:hover {
+  color: #EF4444;
+}
+
+/* ── Shared Calendar Event cards ── */
+.shared-event-card {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  border-left: 4px solid var(--accent-purple);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.shared-event-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.shared-event-name {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shared-event-owner {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
+  color: #fff;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.shared-event-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+.shared-date-group {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+
+/* Friend search results list */
+.friend-result-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.friend-result-item:hover {
+  background: rgba(139, 92, 246, 0.15);
+}
+
+.friend-result-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.friend-result-nick {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.friend-result-id {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-family: monospace;
+  letter-spacing: 0.1em;
+}
+
+/* Friends legend bar */
+.friends-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.friends-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
