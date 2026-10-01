@@ -33,10 +33,23 @@
       <div class="header-actions">
         <button id="btnSettings" class="btn-icon" title="Scegli corso di studio">⚙️</button>
         <button id="btnRefresh" class="btn-icon" title="Aggiorna Calendario">🔄</button>
-        <button id="btnMobileInfo" class="btn-icon" title="Connetti Smartphone">📱</button>
+        <button id="btnShare" class="btn-icon" title="Condividi orario">🔗</button>
       </div>
     </div>
   </header>
+
+  <!-- Shared Timetable Preview Banner -->
+  <div id="previewBanner" class="preview-banner">
+    <div class="preview-info">
+      <strong>👁 Orario condiviso</strong>
+      <span id="previewLabel"></span>
+      <span id="previewHint" class="preview-hint"></span>
+    </div>
+    <div class="preview-actions">
+      <button id="btnImportShared" class="btn-primary">Importa</button>
+      <button id="btnExitPreview" class="btn-secondary">✕ Esci</button>
+    </div>
+  </div>
 
   <!-- Filter & Mode Selection -->
   <div class="filter-container">
@@ -92,21 +105,22 @@
     </p>
   </footer>
 
-  <!-- QR Code & Mobile Connection Modal -->
-  <div id="qrModal" class="modal-overlay">
+  <!-- Share Link & QR Code Modal -->
+  <div id="shareModal" class="modal-overlay">
     <div class="modal-content">
       <div class="modal-header">
-        <h3>📱 Connetti lo Smartphone</h3>
-        <button id="btnCloseQrModal" class="btn-icon" style="width:30px; height:30px;">✕</button>
+        <h3>🔗 Condividi il tuo orario</h3>
+        <button id="btnCloseShare" class="btn-icon" style="width:30px; height:30px;">✕</button>
       </div>
-      <p style="font-size:0.85rem; color:var(--text-secondary);">
-        Apri questo indirizzo dal tuo smartphone o aggiungilo alla schermata Home:
-      </p>
+      <p id="shareHint" style="font-size:0.85rem; color:var(--text-secondary);"></p>
       <div class="qr-box">
         <img id="qrImage" src="" alt="QR Code">
       </div>
-      <div id="mobileUrlText" class="mobile-url-box">https://unimib-calendar.vercel.app</div>
-      <button id="btnCloseQrModal" class="btn-primary" onclick="document.getElementById('qrModal').classList.remove('active')">Chiudi</button>
+      <div id="shareUrlText" class="mobile-url-box"></div>
+      <div class="share-actions">
+        <button id="btnCopyShare" class="btn-primary">📋 Copia link</button>
+        <button id="btnNativeShare" class="btn-secondary">📤 Condividi…</button>
+      </div>
     </div>
   </div>
 

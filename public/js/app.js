@@ -14,6 +14,7 @@ let state = {
   searchQuery: '',
   config: null,           // { anno, corso, corsoLabel, anni: [...], anniLabels: [...], favorites: [{code, label}] }
   favoriteColors: {},     // course_code -> color
+  preview: false,         // true while viewing a shared config that is not saved
   requestId: 0
 };
 
@@ -31,12 +32,14 @@ document.addEventListener('DOMContentLoaded', () => {
 function initApp() {
   setupEventListeners();
   registerServiceWorker();
-  setupQrCode();
 
   state.currentMonday = formatFormattedDate(getMonday(new Date()));
   state.config = loadConfig();
 
-  if (state.config) {
+  const shared = readSharedConfig();
+  if (shared) {
+    enterPreview(shared);
+  } else if (state.config) {
     applyConfig();
     loadCalendar(state.currentMonday);
   } else {
@@ -51,12 +54,6 @@ function registerServiceWorker() {
       console.warn('SW registration failed:', err);
     });
   }
-}
-
-function setupQrCode() {
-  const mobileUrl = window.location.origin + '/';
-  document.getElementById('mobileUrlText').textContent = mobileUrl;
-  document.getElementById('qrImage').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(mobileUrl)}`;
 }
 
 function setupEventListeners() {
@@ -97,14 +94,17 @@ function setupEventListeners() {
     });
   }
 
-  // Modals
-  document.getElementById('btnMobileInfo').addEventListener('click', () => {
-    document.getElementById('qrModal').classList.add('active');
+  // Share link
+  document.getElementById('btnShare').addEventListener('click', openShare);
+  document.getElementById('btnCloseShare').addEventListener('click', () => {
+    document.getElementById('shareModal').classList.remove('active');
   });
+  document.getElementById('btnCopyShare').addEventListener('click', copyShareUrl);
+  document.getElementById('btnNativeShare').addEventListener('click', nativeShare);
 
-  document.getElementById('btnCloseQrModal').addEventListener('click', () => {
-    document.getElementById('qrModal').classList.remove('active');
-  });
+  // Shared config preview
+  document.getElementById('btnImportShared').addEventListener('click', importShared);
+  document.getElementById('btnExitPreview').addEventListener('click', exitPreview);
 
   // Course of study setup
   document.getElementById('btnSettings').addEventListener('click', () => openSetup());
@@ -190,6 +190,156 @@ function applyConfig() {
 
   document.getElementById('headerSubtitle').textContent = `${cfg.corsoLabel} · ${cfg.anniLabels.join(', ')}`;
   setFilter(cfg.favorites && cfg.favorites.length ? 'target' : 'all');
+}
+
+// ---------- Share link (?anno=2026&corso=F1801Q&anno2=GGG%7C2&fav=EC523651,EC523669) ----------
+
+function shareUrl(cfg) {
+  if (!cfg) return `${window.location.origin}/`;
+  const params = new URLSearchParams({ anno: cfg.anno, corso: cfg.corso });
+  cfg.anni.forEach(a => params.append('anno2', a));
+  const favs = (cfg.favorites || []).map(f => f.code);
+  if (favs.length) params.set('fav', favs.join(','));
+  // Commas are valid in a query string: keep the favorites list readable
+  return `${window.location.origin}/?${params.toString().replace(/%2C/gi, ',')}`;
+}
+
+function readSharedConfig() {
+  const params = new URLSearchParams(window.location.search);
+  const anno = params.get('anno') || '';
+  const corso = params.get('corso') || '';
+  const anni = params.getAll('anno2').filter(Boolean);
+  if (!/^\d{4}$/.test(anno) || !/^[A-Za-z0-9_-]+$/.test(corso) || !anni.length) return null;
+  const favCodes = (params.get('fav') || '').split(',').filter(code => /^[\w.-]+$/.test(code));
+  return { anno, corso, anni, favCodes };
+}
+
+// The link only carries codes: labels are looked up again, falling back to the codes themselves
+async function resolveSharedConfig(shared) {
+  const cfg = {
+    anno: shared.anno,
+    area: '',
+    corso: shared.corso,
+    corsoLabel: shared.corso,
+    anni: shared.anni,
+    anniLabels: shared.anni.slice(),
+    favorites: shared.favCodes.map(code => ({ code, label: code }))
+  };
+  try {
+    const data = await fetchJson(`/api/options?anno=${encodeURIComponent(shared.anno)}&corso=${encodeURIComponent(shared.corso)}`);
+    const years = data.years || [];
+    const teachings = years.flatMap(y => y.teachings);
+    cfg.area = data.area || '';
+    cfg.corsoLabel = data.label || shared.corso;
+    cfg.anniLabels = shared.anni.map(a => (years.find(y => y.value === a) || { label: a }).label);
+    cfg.favorites = shared.favCodes.map(code => ({ code, label: (teachings.find(t => t.code === code) || { label: code }).label }));
+  } catch (err) {
+    console.warn('Shared config labels unavailable:', err);
+  }
+  return cfg;
+}
+
+async function enterPreview(shared) {
+  const hasOwnConfig = Boolean(state.config);
+  showLoading(true);
+  state.config = await resolveSharedConfig(shared);
+  state.preview = true;
+
+  document.getElementById('previewLabel').textContent = `${state.config.corsoLabel} · ${state.config.anniLabels.join(', ')}`;
+  document.getElementById('previewHint').textContent = hasOwnConfig ? 'Importandolo sostituirai la tua configurazione attuale.' : '';
+  document.getElementById('previewBanner').classList.add('active');
+
+  applyConfig();
+  loadCalendar(state.currentMonday);
+}
+
+function endPreview() {
+  state.preview = false;
+  document.getElementById('previewBanner').classList.remove('active');
+  history.replaceState(null, '', '/');
+}
+
+function importShared() {
+  saveConfig(state.config);
+  clearCalendarCache();
+  endPreview();
+  showToast('Orario importato!');
+}
+
+function exitPreview() {
+  endPreview();
+  state.requestId++;
+  state.config = loadConfig();
+  state.calendarData = null;
+  state.selectedDayDate = 'all';
+
+  if (state.config) {
+    applyConfig();
+    loadCalendar(state.currentMonday);
+  } else {
+    document.getElementById('headerSubtitle').textContent = 'Seleziona il tuo corso';
+    document.getElementById('daysTabBar').innerHTML = '';
+    showWelcome();
+    openSetup();
+  }
+}
+
+function openShare() {
+  const cfg = state.config;
+  const url = shareUrl(cfg);
+  document.getElementById('shareHint').textContent = cfg
+    ? 'Chi apre questo link (o inquadra il QR) vedrà questo orario e potrà importarlo.'
+    : 'Scegli prima il tuo corso per condividere l\'orario. Intanto, ecco il link all\'app:';
+  document.getElementById('shareUrlText').textContent = url;
+  document.getElementById('qrImage').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`;
+  document.getElementById('btnNativeShare').style.display = navigator.share ? '' : 'none';
+  document.getElementById('shareModal').classList.add('active');
+}
+
+async function copyShareUrl() {
+  const urlBox = document.getElementById('shareUrlText');
+  const url = urlBox.textContent;
+  try {
+    // navigator.clipboard only exists on HTTPS/localhost (not e.g. http://192.168.x.x)
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(url);
+    } else if (!legacyCopy(url)) {
+      throw new Error('Copy command rejected');
+    }
+    showToast('Link copiato!');
+  } catch (err) {
+    console.warn('Clipboard error', err);
+    window.getSelection().selectAllChildren(urlBox);
+    showToast('Link selezionato: premi Ctrl+C per copiarlo.');
+  }
+}
+
+function legacyCopy(text) {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } catch (e) {
+    copied = false;
+  }
+  textarea.remove();
+  return copied;
+}
+
+async function nativeShare() {
+  const url = document.getElementById('shareUrlText').textContent;
+  const text = state.config ? `Orario UNIMIB · ${state.config.corsoLabel}` : 'UNIMIB Orari';
+  try {
+    await navigator.share({ title: 'UNIMIB Orari', text, url });
+  } catch (err) {
+    if (err.name !== 'AbortError') showToast('Condivisione non riuscita.');
+  }
 }
 
 // ---------- Setup modal (mirrors the UNIMIB "By degree" form dropdowns) ----------
@@ -359,6 +509,7 @@ function saveSetup() {
   };
   saveConfig(state.config);
   clearCalendarCache();
+  if (state.preview) endPreview();
 
   closeSetup();
   applyConfig();
@@ -448,11 +599,13 @@ async function loadCalendar(mondayDateStr, forceRefresh = false) {
     if (requestId !== state.requestId) return;
     state.calendarData = data;
 
-    // Save to LocalStorage
-    try {
-      localStorage.setItem(cacheKey, JSON.stringify(data));
-    } catch (e) {
-      console.warn('Cache save error', e);
+    // Save to LocalStorage (a shared config being previewed leaves nothing behind)
+    if (!state.preview) {
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(data));
+      } catch (e) {
+        console.warn('Cache save error', e);
+      }
     }
 
     renderCalendar();

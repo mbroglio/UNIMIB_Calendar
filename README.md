@@ -12,6 +12,7 @@ A modern, mobile-first Web Application and Progressive Web App (PWA) designed to
 
 - **🎓 Any Course of Study**: On first launch (and anytime via ⚙️) pick *academic year*, *didactic area*, *course of study* and one or more *years of study* (e.g. "2 - PERCORSO COMUNE", "2 - T1 - Monza e Teledidattica"). All choices are loaded live from the same data that feeds the dropdowns of the [official "By degree" form](https://gestioneorari.didattica.unimib.it/PortaleStudentiUnimib/index.php?view=easycourse&_lang=en&include=corso) (`combo.php`), so new years and courses appear automatically.
 - **⭐ My Courses Highlight**: Choose your own courses (teachings) from the selected years to get color-coded cards and a dedicated "I Miei Corsi" filter.
+- **🔗 Share Link**: Tap 🔗 to get a readable link (plus QR code) to your configuration, e.g. `/?anno=2026&corso=F1801Q&anno2=GGG%7C2&fav=EC523651,EC523669`. Whoever opens it sees that timetable in preview mode, without saving anything, and can then **import** it or **exit** back to their own. `anno2` is repeatable and `fav` lists the teaching codes; labels are looked up again, so no server-side storage is needed.
 - **🔄 Live Dynamic Scraping**: Interrogates the official UNIMIB EasyCourse API (`grid_call.php`) on demand for any selected week.
 - **📱 Mobile-First Glassmorphism UI**: Beautiful, dark-themed responsive interface optimized for smartphone screens with PWA support ("Add to Home Screen" on iOS & Android).
 - **👆 Touch Gestures**: Swipe left or right on mobile devices to easily navigate between weeks or days.
@@ -60,7 +61,7 @@ A modern, mobile-first Web Application and Progressive Web App (PWA) designed to
 | --- | --- |
 | `GET /api/options` | Academic years |
 | `GET /api/options?anno=2026` | Didactic areas and courses of study, each with its years of study |
-| `GET /api/options?anno=2026&corso=F1802Q` | Years of study of a course with their teachings |
+| `GET /api/options?anno=2026&corso=F1802Q` | Label, type and area of a course, plus its years of study with their teachings |
 | `GET /api/calendar?anno=2026&corso=F1802Q&anno2=GGG\|1&anno2=GGG\|2&date=29-09-2026` | Lessons of the week containing `date` for the selected years of study (`anno2` is repeatable) |
 
 ---
