@@ -76,7 +76,8 @@ let friendsState = {
 let setup = {
   seq: 0,
   courses: [],
-  teachings: []
+  teachings: [],
+  _pendingProfile: null
 };
 
 
@@ -148,13 +149,41 @@ function setupEventListeners() {
   document.getElementById('btnCloseProfile').addEventListener('click', () => {
     document.getElementById('profileModal').classList.remove('active');
   });
-  document.getElementById('btnCreateProfile').addEventListener('click', handleCreateProfile);
+  document.getElementById('btnCreateProfile').addEventListener('click', handleCreateProfileStep2);
+  const btnCreateWithExt = document.getElementById('btnCreateWithExistingConfig');
+  if (btnCreateWithExt) btnCreateWithExt.addEventListener('click', handleCreateWithExistingConfig);
+  const btnBackStep1 = document.getElementById('btnBackToProfileStep1');
+  if (btnBackStep1) btnBackStep1.addEventListener('click', handleBackToProfileStep1);
   document.getElementById('btnLoginProfile').addEventListener('click', handleLoginProfile);
   document.getElementById('btnLogoutProfile').addEventListener('click', handleLogoutProfile);
   document.getElementById('btnCopyProfileId').addEventListener('click', copyProfileId);
   const btnShareMyCal = document.getElementById('btnShareMyCalLink');
   if (btnShareMyCal) btnShareMyCal.addEventListener('click', shareMyCalendarLink);
   document.getElementById('btnSyncNow').addEventListener('click', syncProfileNow);
+
+  // Enter key support for quick profile submit
+  ['profileNickname', 'profilePin', 'profilePinConfirm'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleCreateProfileStep2();
+        }
+      });
+    }
+  });
+  ['profileLoginNickname', 'profileLoginPin'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          handleLoginProfile();
+        }
+      });
+    }
+  });
 
   // Friends / shared calendar buttons
   document.getElementById('btnAddFriend').addEventListener('click', openAddFriendModal);
@@ -377,6 +406,8 @@ function setupEventListeners() {
   document.querySelectorAll('.modal-overlay').forEach(overlay => {
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay) {
+        if (overlay.id === 'onboardingModal') return;
+        if (overlay.id === 'setupModal' && (!state.config || setup._pendingProfile)) return;
         overlay.classList.remove('active');
       }
     });
@@ -640,11 +671,35 @@ async function nativeShare() {
 
 // ---------- Setup modal (mirrors the UNIMIB "By degree" form dropdowns) ----------
 
-async function openSetup() {
+async function openSetup(presetOverride, pendingProfile) {
   document.getElementById('setupModal').classList.add('active');
-  document.getElementById('btnCloseSetup').style.display = state.config ? '' : 'none';
 
-  const preset = state.config || {};
+  const pending = pendingProfile || setup._pendingProfile;
+  const banner = document.getElementById('setupProfileBanner');
+  const bannerNick = document.getElementById('setupProfileBannerNick');
+  const modalTitle = document.getElementById('setupModalTitle');
+  const btnBack = document.getElementById('btnBackToProfileStep1');
+  const btnClose = document.getElementById('btnCloseSetup');
+  const btnSave = document.getElementById('btnSaveSetup');
+
+  if (pending) {
+    if (banner) {
+      banner.style.display = '';
+      if (bannerNick) bannerNick.textContent = pending.nickname;
+    }
+    if (modalTitle) modalTitle.textContent = '🎓 Scegli il tuo corso e le materie';
+    if (btnBack) btnBack.style.display = '';
+    if (btnClose) btnClose.style.display = 'none';
+    if (btnSave) btnSave.textContent = '🎉 Completa creazione profilo';
+  } else {
+    if (banner) banner.style.display = 'none';
+    if (modalTitle) modalTitle.textContent = '🎓 Il tuo corso di studio';
+    if (btnBack) btnBack.style.display = 'none';
+    if (btnClose) btnClose.style.display = state.config ? '' : 'none';
+    if (btnSave) btnSave.textContent = 'Salva';
+  }
+
+  const preset = presetOverride || state.config || {};
   const seq = ++setup.seq;
   const yearSelect = document.getElementById('cfgYear');
   fillSelect(yearSelect, [], 'Caricamento...');
@@ -666,6 +721,7 @@ async function openSetup() {
 
 function closeSetup() {
   setup.seq++;
+  setup._pendingProfile = null;
   document.getElementById('setupModal').classList.remove('active');
 }
 
@@ -781,7 +837,7 @@ function updateSaveButton() {
   document.getElementById('btnSaveSetup').disabled = !ready;
 }
 
-function saveSetup() {
+async function saveSetup() {
   const corso = document.getElementById('cfgCourse').value;
   const course = setup.courses.find(c => c.value === corso);
   const anni = getCheckedValues('cfgStudyYears');
@@ -794,7 +850,7 @@ function saveSetup() {
     return { code, label: t ? t.label : code };
   });
 
-  state.config = {
+  const newConfig = {
     anno: document.getElementById('cfgYear').value,
     area: document.getElementById('cfgArea').value,
     corso,
@@ -803,6 +859,77 @@ function saveSetup() {
     anniLabels: anni.map(a => (course.years.find(y => y.value === a) || { label: a }).label),
     favorites
   };
+
+  // Step 2 profile creation flow
+  if (setup._pendingProfile) {
+    const btn = document.getElementById('btnSaveSetup');
+    const oldText = btn ? btn.textContent : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Creazione profilo in corso...';
+    }
+    try {
+      const resp = await fetch('/api/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nickname: setup._pendingProfile.nickname,
+          pin: setup._pendingProfile.pin,
+          config: newConfig,
+          exam_courses: examsState.extraCourses || []
+        })
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        const errMsg = data.error || 'Errore durante la creazione del profilo.';
+        handleBackToProfileStep1();
+        const errEl = document.getElementById('profileCreateError');
+        if (errEl) {
+          errEl.textContent = errMsg;
+          errEl.style.display = '';
+        }
+        showToast(errMsg);
+        return;
+      }
+
+      profileState.nickname  = data.nickname;
+      profileState.shareCode = data.share_code;
+      profileState.lastSync  = Date.now();
+      profileState._pin      = setup._pendingProfile.pin;
+      saveProfileLocally();
+
+      state.config = newConfig;
+      saveConfig(state.config);
+      clearCalendarCache();
+      if (state.preview) endPreview();
+
+      setup._pendingProfile = null;
+      closeSetup();
+      applyConfig();
+      state.calendarData = null;
+      state.selectedDayDate = 'all';
+
+      if (newConfig.favorites && newConfig.favorites.length > 0) {
+        setFilter('target');
+      }
+
+      loadCalendar(state.currentMonday);
+      showToast(`🎉 Profilo creato con successo! Codice calendario: ${data.share_code}`, 5000);
+      return;
+    } catch (err) {
+      console.error('Profile creation error:', err);
+      showToast('Errore di connessione durante la creazione del profilo.');
+      return;
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = oldText;
+      }
+    }
+  }
+
+  // Normal config save
+  state.config = newConfig;
   saveConfig(state.config);
   clearCalendarCache();
   if (state.preview) endPreview();
@@ -2075,6 +2202,38 @@ function renderProfileModal() {
     if (loginNickEl) loginNickEl.value = '';
     document.getElementById('profileLoginPin').value    = '';
     document.getElementById('profileLoginError').style.display  = 'none';
+
+    // Existing Course info box (shown if state.config is already set)
+    const configBox = document.getElementById('profileCurrentConfigBox');
+    const configTitle = document.getElementById('profileCurrentConfigTitle');
+    const configFavs = document.getElementById('profileCurrentConfigFavs');
+    const btnWithExisting = document.getElementById('btnCreateWithExistingConfig');
+    const btnCreate = document.getElementById('btnCreateProfile');
+
+    if (state.config && state.config.corsoLabel) {
+      if (configBox) configBox.style.display = '';
+      if (configTitle) {
+        const yearsStr = state.config.anniLabels && state.config.anniLabels.length
+          ? ` (${state.config.anniLabels.join(', ')})`
+          : '';
+        configTitle.textContent = `${state.config.corsoLabel}${yearsStr}`;
+      }
+      if (configFavs) {
+        const favCount = (state.config.favorites || []).length;
+        configFavs.textContent = favCount > 0
+          ? `⭐ ${favCount} ${favCount === 1 ? 'materia seguita' : 'materie seguite'}`
+          : 'Nessuna materia selezionata con la stella';
+      }
+      if (btnWithExisting) {
+        btnWithExisting.style.display = '';
+        btnWithExisting.textContent = '✨ Salva profilo con questo corso';
+      }
+      if (btnCreate) btnCreate.textContent = '📚 Scegli un altro corso ➡️';
+    } else {
+      if (configBox) configBox.style.display = 'none';
+      if (btnWithExisting) btnWithExisting.style.display = 'none';
+      if (btnCreate) btnCreate.textContent = 'Continua: Scegli i tuoi corsi ➡️';
+    }
   }
 }
 
@@ -2085,39 +2244,67 @@ function showProfileTab(tab) {
   document.getElementById('profileTabLogin').classList.toggle('active', tab === 'login');
 }
 
-async function handleCreateProfile() {
+function validateProfileInputs() {
   const nickname = document.getElementById('profileNickname').value.trim();
   const pin      = document.getElementById('profilePin').value.trim();
   const pinConf  = document.getElementById('profilePinConfirm').value.trim();
   const errEl    = document.getElementById('profileCreateError');
 
-  errEl.style.display = 'none';
+  if (errEl) errEl.style.display = 'none';
 
   if (!nickname) {
-    errEl.textContent = 'Inserisci un soprannome.';
-    errEl.style.display = '';
-    return;
+    if (errEl) {
+      errEl.textContent = 'Inserisci un soprannome.';
+      errEl.style.display = '';
+    }
+    return null;
   }
-  if (!pin || pin.length < 4 || !/^\d+$/.test(pin)) {
-    errEl.textContent = 'Il PIN deve essere di almeno 4 cifre numeriche.';
-    errEl.style.display = '';
-    return;
+  if (!pin || pin.length < 4 || pin.length > 8 || !/^\d+$/.test(pin)) {
+    if (errEl) {
+      errEl.textContent = 'Il PIN deve essere formato da 4 a 8 cifre numeriche.';
+      errEl.style.display = '';
+    }
+    return null;
   }
   if (pin !== pinConf) {
-    errEl.textContent = 'I PIN non corrispondono.';
-    errEl.style.display = '';
-    return;
+    if (errEl) {
+      errEl.textContent = 'I PIN non corrispondono.';
+      errEl.style.display = '';
+    }
+    return null;
   }
+  return { nickname, pin };
+}
 
-  const btn = document.getElementById('btnCreateProfile');
-  btn.disabled = true;
-  btn.textContent = 'Creazione in corso...';
+function handleCreateProfileStep2() {
+  const creds = validateProfileInputs();
+  if (!creds) return;
+
+  setup._pendingProfile = creds;
+  document.getElementById('profileModal').classList.remove('active');
+  openSetup(state.config || {}, creds);
+}
+
+const handleCreateProfile = handleCreateProfileStep2;
+
+async function handleCreateWithExistingConfig() {
+  const creds = validateProfileInputs();
+  if (!creds) return;
+
+  const btn = document.getElementById('btnCreateWithExistingConfig');
+  const oldText = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Creazione profilo in corso...';
+  }
+  const errEl = document.getElementById('profileCreateError');
+  if (errEl) errEl.style.display = 'none';
 
   try {
     const body = {
-      nickname,
-      pin,
-      config:       state.config || null,
+      nickname: creds.nickname,
+      pin: creds.pin,
+      config: state.config || null,
       exam_courses: examsState.extraCourses || []
     };
     const resp = await fetch('/api/profile', {
@@ -2127,27 +2314,49 @@ async function handleCreateProfile() {
     });
     const data = await resp.json();
     if (!resp.ok) {
-      errEl.textContent = data.error || 'Errore durante la creazione.';
-      errEl.style.display = '';
+      if (errEl) {
+        errEl.textContent = data.error || 'Errore durante la creazione.';
+        errEl.style.display = '';
+      }
       return;
     }
     profileState.nickname  = data.nickname;
     profileState.shareCode = data.share_code;
     profileState.lastSync  = Date.now();
-    profileState._pin      = pin;  // session-only, for background auto-sync
+    profileState._pin      = creds.pin;
     saveProfileLocally();
     renderProfileModal();
-    showToast(`Profilo creato! Il tuo codice calendario è: ${data.share_code}`);
+    showToast(`🎉 Profilo creato! Il tuo codice calendario è: ${data.share_code}`, 5000);
     setTimeout(() => {
       document.getElementById('profileModal').classList.remove('active');
-      if (!state.config) openSetup();
     }, 1200);
   } catch (e) {
-    errEl.textContent = 'Errore di connessione. Riprova.';
-    errEl.style.display = '';
+    if (errEl) {
+      errEl.textContent = 'Errore di connessione. Riprova.';
+      errEl.style.display = '';
+    }
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Crea profilo';
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = oldText;
+    }
+  }
+}
+
+function handleBackToProfileStep1() {
+  const pending = setup._pendingProfile;
+  setup.seq++;
+  document.getElementById('setupModal').classList.remove('active');
+  setup._pendingProfile = null;
+  openProfileModal();
+  showProfileTab('create');
+  if (pending) {
+    const nickEl = document.getElementById('profileNickname');
+    const pinEl = document.getElementById('profilePin');
+    const confEl = document.getElementById('profilePinConfirm');
+    if (nickEl) nickEl.value = pending.nickname || '';
+    if (pinEl) pinEl.value = pending.pin || '';
+    if (confEl) confEl.value = pending.pin || '';
   }
 }
 
@@ -2201,10 +2410,13 @@ async function handleLoginProfile() {
       return;
     }
 
-    if (!state.config && data.config) {
+    if (data.config) {
       state.config = data.config;
       saveConfig(state.config);
       applyConfig();
+      if (data.config.favorites && data.config.favorites.length > 0) {
+        setFilter('target');
+      }
       loadCalendar(state.currentMonday);
     }
     if (data.exam_courses && data.exam_courses.length && !examsState.extraCourses.length) {

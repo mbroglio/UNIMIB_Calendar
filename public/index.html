@@ -404,8 +404,14 @@
   <div id="setupModal" class="modal-overlay">
     <div class="modal-content setup-content">
       <div class="modal-header">
-        <h3>🎓 Il tuo corso di studio</h3>
+        <h3 id="setupModalTitle">🎓 Il tuo corso di studio</h3>
         <button id="btnCloseSetup" class="btn-icon" style="width:30px; height:30px;">✕</button>
+      </div>
+
+      <!-- Profile Creation Banner (Step 2) -->
+      <div id="setupProfileBanner" style="display:none; background:rgba(139,92,246,0.15); border:1px solid rgba(139,92,246,0.35); border-radius:10px; padding:10px 14px; margin-bottom:14px; font-size:0.85rem; line-height:1.45;">
+        👤 Stai configurando i corsi per <strong id="setupProfileBannerNick" style="color:#FFF;"></strong>.<br>
+        <span style="font-size:0.78rem; color:var(--text-secondary);">Scegli il tuo corso di studio e seleziona con la stella ⭐ le materie che segui.</span>
       </div>
 
       <div class="form-field">
@@ -427,13 +433,16 @@
         </div>
       </div>
       <div class="form-field">
-        <label>⭐ I miei corsi <span class="field-hint">(opzionale)</span></label>
+        <label>⭐ I miei corsi seguiti <span class="field-hint">(seleziona le materie che frequenti)</span></label>
         <div id="cfgFavorites" class="choice-list">
           <p class="field-hint">Seleziona prima l'anno di studio.</p>
         </div>
       </div>
 
-      <button id="btnSaveSetup" class="btn-primary" disabled>Salva</button>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <button id="btnBackToProfileStep1" class="btn-secondary" style="display:none; width:auto; padding:10px 14px; font-size:0.85rem;">⬅️ Indietro</button>
+        <button id="btnSaveSetup" class="btn-primary" style="flex:1;" disabled>Salva</button>
+      </div>
     </div>
   </div>
 
@@ -471,7 +480,7 @@
           ✨ Crea il tuo profilo
         </button>
         <button id="btnOnboardingLogin" class="btn-secondary" style="padding: 12px; font-size: 0.95rem; font-weight: 600;">
-          🔑 Ho già un Codice Calendario
+          🔑 Ho già un profilo (Accedi)
         </button>
         <button id="btnOnboardingGuest" class="btn-secondary" style="padding: 12px; font-size: 0.9rem; opacity: 0.85; border-style: dashed;">
           👤 Continua come ospite
@@ -512,7 +521,7 @@
                    style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:0.9rem; outline:none;">
           </div>
           <div class="form-field">
-            <label for="profilePin">PIN <span class="field-hint">(4-8 cifre, da usare per accedere su altri dispositivi)</span></label>
+            <label for="profilePin">PIN <span class="field-hint">(4-8 cifre, per accedere su altri dispositivi)</span></label>
             <input type="password" id="profilePin" placeholder="••••" maxlength="8" inputmode="numeric" pattern="[0-9]*"
                    style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:0.9rem; outline:none; letter-spacing:0.2em;">
           </div>
@@ -521,8 +530,17 @@
             <input type="password" id="profilePinConfirm" placeholder="••••" maxlength="8" inputmode="numeric" pattern="[0-9]*"
                    style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:0.9rem; outline:none; letter-spacing:0.2em;">
           </div>
+
+          <!-- Existing Course info box (shown if state.config is already set) -->
+          <div id="profileCurrentConfigBox" style="display:none; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:10px 12px; margin:12px 0;">
+            <span style="font-size:0.75rem; color:var(--text-muted); display:block; text-transform:uppercase; letter-spacing:0.04em;">Corso attualmente selezionato:</span>
+            <strong id="profileCurrentConfigTitle" style="color:var(--text-primary); font-size:0.9rem; display:block; margin:2px 0;"></strong>
+            <span id="profileCurrentConfigFavs" style="font-size:0.8rem; color:var(--accent-purple);"></span>
+          </div>
+
           <p id="profileCreateError" style="color:#EF4444; font-size:0.8rem; display:none; margin-bottom:8px;"></p>
-          <button id="btnCreateProfile" class="btn-primary" style="width:100%; margin-top:4px;">Crea profilo</button>
+          <button id="btnCreateProfile" class="btn-primary" style="width:100%; margin-top:4px;">Continua: Scegli i tuoi corsi ➡️</button>
+          <button id="btnCreateWithExistingConfig" class="btn-secondary" style="width:100%; margin-top:8px; display:none;">✨ Salva profilo con questo corso</button>
         </div>
 
         <!-- Login Form -->

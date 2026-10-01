@@ -34,6 +34,7 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 
 ### 4. 👤 Cloud Profile & Synchronisation (No Complex Passwords)
 - **🔑 Memorable Auth (Nickname + PIN)**: No email or password needed. Create an account with your chosen **Soprannome** (e.g. `Mario`) and a 4-8 digit **PIN** (e.g. `1234`).
+- **📚 Guided Study Plan Onboarding (2-Step Flow)**: When creating a profile, users are immediately guided to select their degree programme, study year, and active teachings (⭐ I miei corsi). If the student has already picked a course as a guest, a 1-tap instant save option (*"Salva profilo con questo corso"*) is also provided.
 - **📱 Multi-Device Sync**: Log in on any device (iPhone, laptop, tablet) simply by entering your Soprannome and PIN. Your study plan, favorite courses, and monitored exams sync automatically.
 - **⚡ First-Visit Onboarding**: First-time visitors can choose to create a profile, log in to restore an existing plan, or **Continua come ospite** (Guest mode) to start immediately without registration.
 - **☁️ Serverless Storage**: Backed by **Upstash Redis REST API**, salted with SHA-256 for secure PIN verification.
@@ -47,7 +48,7 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 ### 6. 📱 iOS & Mobile Optimizations
 - **Safe Area Inset Support**: Fully accounts for iPhone notch, Dynamic Island, and home indicator bars (`env(safe-area-inset-top)` and `env(safe-area-inset-bottom)`).
 - **Compact Header Breakpoints**: Responsive adjustments for narrower screens (e.g. iPhone SE / mini) to keep all navigation buttons accessible.
-- **PWA Offline Caching**: Service Worker v11 caches core application assets for fast load times and offline readiness.
+- **PWA Offline Caching**: Service Worker v12 caches core application assets for fast load times and offline readiness.
 
 ---
 
