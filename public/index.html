@@ -115,7 +115,11 @@
           </div>
           <div class="rooms-date-nav">
             <button id="btnRoomsPrevDay" class="btn-icon" style="width:36px;height:36px;" title="Giorno precedente">◀</button>
-            <input type="date" id="roomsDateInput">
+            <div id="roomsDateWrapper" class="date-picker-custom-wrapper" title="Clicca per aprire il calendario">
+              <span id="roomsDateFormattedText" class="custom-date-text">gg/mm/aaaa</span>
+              <span class="custom-date-icon">📅</span>
+              <input type="date" id="roomsDateInput" class="hidden-date-input" aria-label="Seleziona data">
+            </div>
             <button id="btnRoomsNextDay" class="btn-icon" style="width:36px;height:36px;" title="Giorno successivo">▶</button>
             <button id="btnRoomsToday" class="btn-secondary" style="width:auto;padding:8px 12px;font-size:0.8rem;font-weight:600;">Oggi</button>
           </div>
@@ -197,9 +201,17 @@
           <button class="filter-pill" data-session="custom">📅 Personalizzato</button>
         </div>
         <div id="examCustomDateRange" style="display:none; align-items:center; gap:8px; margin-top:8px;">
-          <input type="date" id="examDateFrom" style="flex:1; padding:8px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:#FFF; color-scheme:dark; font-size:0.8rem;">
+          <div class="date-picker-custom-wrapper" style="flex:1;">
+            <span id="examDateFromText" class="custom-date-text" style="font-size:0.8rem;">gg/mm/aaaa</span>
+            <span class="custom-date-icon" style="font-size:0.8rem;">📅</span>
+            <input type="date" id="examDateFrom" class="hidden-date-input" aria-label="Data inizio">
+          </div>
           <span style="color:var(--text-muted); font-size:0.8rem;">al</span>
-          <input type="date" id="examDateTo" style="flex:1; padding:8px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:#FFF; color-scheme:dark; font-size:0.8rem;">
+          <div class="date-picker-custom-wrapper" style="flex:1;">
+            <span id="examDateToText" class="custom-date-text" style="font-size:0.8rem;">gg/mm/aaaa</span>
+            <span class="custom-date-icon" style="font-size:0.8rem;">📅</span>
+            <input type="date" id="examDateTo" class="hidden-date-input" aria-label="Data fine">
+          </div>
           <button id="btnApplyExamDates" class="btn-primary" style="width:auto; padding:8px 12px; font-size:0.8rem;">Filtra</button>
         </div>
       </div>

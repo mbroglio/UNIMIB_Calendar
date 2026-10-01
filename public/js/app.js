@@ -59,6 +59,7 @@ function initApp() {
   examsState.extraCourses = loadExamCourses();
 
   setupEventListeners();
+  updateRoomsDateDisplay();
   registerServiceWorker();
 
   state.currentMonday = formatFormattedDate(getMonday(new Date()));
@@ -148,6 +149,18 @@ function setupEventListeners() {
     }
   });
 
+  const roomsDateWrapper = document.getElementById('roomsDateWrapper');
+  if (roomsDateWrapper) {
+    roomsDateWrapper.addEventListener('click', (e) => {
+      const input = document.getElementById('roomsDateInput');
+      if (input && typeof input.showPicker === 'function' && e.target !== input) {
+        try {
+          input.showPicker();
+        } catch (err) {}
+      }
+    });
+  }
+
   document.getElementById('btnRoomsPrevDay').addEventListener('click', () => changeRoomsDate(-1));
   document.getElementById('btnRoomsNextDay').addEventListener('click', () => changeRoomsDate(1));
   document.getElementById('btnRoomsToday').addEventListener('click', setRoomsDateToday);
@@ -214,6 +227,22 @@ function setupEventListeners() {
   document.getElementById('btnApplyExamDates').addEventListener('click', () => {
     loadExams();
   });
+
+  const examDateFromInput = document.getElementById('examDateFrom');
+  const examDateFromText = document.getElementById('examDateFromText');
+  if (examDateFromInput && examDateFromText) {
+    examDateFromInput.addEventListener('change', () => {
+      examDateFromText.textContent = examDateFromInput.value ? formatDateItalianShort(examDateFromInput.value) : 'gg/mm/aaaa';
+    });
+  }
+
+  const examDateToInput = document.getElementById('examDateTo');
+  const examDateToText = document.getElementById('examDateToText');
+  if (examDateToInput && examDateToText) {
+    examDateToInput.addEventListener('change', () => {
+      examDateToText.textContent = examDateToInput.value ? formatDateItalianShort(examDateToInput.value) : 'gg/mm/aaaa';
+    });
+  }
 
   document.getElementById('examsSearchInput').addEventListener('input', (e) => {
     examsState.searchQuery = e.target.value;
@@ -1322,6 +1351,8 @@ function renderRooms() {
 function updateRoomsDateDisplay() {
   const el = document.getElementById('roomsDateDisplay');
   if (el) el.textContent = formatDateItalianLong(roomsState.selectedDate);
+  const formattedBox = document.getElementById('roomsDateFormattedText');
+  if (formattedBox) formattedBox.textContent = formatDateItalianShort(roomsState.selectedDate);
 }
 
 function setRoomsDateToday() {
