@@ -1,9 +1,10 @@
-const CACHE_NAME = 'unimib-calendar-v2';
+const CACHE_NAME = 'unimib-calendar-v3';
 const ASSETS = [
   '/',
   '/css/style.css',
   '/js/app.js',
-  '/manifest.json'
+  '/manifest.json',
+  '/icons/icon-192.png'
 ];
 
 self.addEventListener('install', (event) => {
