@@ -37,8 +37,20 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler
 from datetime import datetime, timedelta
 
-REDIS_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
-REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+def _get_redis_creds():
+    url = (
+        os.environ.get("UPSTASH_REDIS_REST_URL")
+        or os.environ.get("KV_REST_API_URL")
+        or os.environ.get("REDIS_REST_URL")
+        or ""
+    ).strip().strip('"').strip("'").rstrip("/")
+    token = (
+        os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+        or os.environ.get("KV_REST_API_TOKEN")
+        or os.environ.get("REDIS_REST_TOKEN")
+        or ""
+    ).strip().strip('"').strip("'")
+    return url, token
 
 GRID_URL = 'https://gestioneorari.didattica.unimib.it/PortaleStudentiUnimib/grid_call.php'
 
@@ -55,12 +67,13 @@ MAX_PROFILES = 8  # safety cap
 # ── Redis helper ────────────────────────────────────────────────────────────────
 
 def _redis_get(key: str):
-    if not REDIS_URL or not REDIS_TOKEN:
-        raise RuntimeError("Upstash Redis env vars not configured")
+    url, token = _get_redis_creds()
+    if not url or not token:
+        raise RuntimeError(f"Upstash Redis env vars not configured: URL={'OK' if url else 'MISSING'}, TOKEN={'OK' if token else 'MISSING'}")
     path = "/GET/" + urllib.parse.quote(key, safe="")
     req  = urllib.request.Request(
-        REDIS_URL + path,
-        headers={"Authorization": f"Bearer {REDIS_TOKEN}"}
+        url + path,
+        headers={"Authorization": f"Bearer {token}"}
     )
     with urllib.request.urlopen(req, timeout=5) as resp:
         body = json.loads(resp.read())

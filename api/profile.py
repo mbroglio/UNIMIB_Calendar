@@ -31,8 +31,20 @@ import urllib.request
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
 
-REDIS_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
-REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+def _get_redis_creds():
+    url = (
+        os.environ.get("UPSTASH_REDIS_REST_URL")
+        or os.environ.get("KV_REST_API_URL")
+        or os.environ.get("REDIS_REST_URL")
+        or ""
+    ).strip().strip('"').strip("'").rstrip("/")
+    token = (
+        os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+        or os.environ.get("KV_REST_API_TOKEN")
+        or os.environ.get("REDIS_REST_TOKEN")
+        or ""
+    ).strip().strip('"').strip("'")
+    return url, token
 
 ID_CHARS   = string.ascii_uppercase + string.digits   # A-Z 0-9
 ID_LENGTH  = 8
@@ -46,12 +58,12 @@ def _redis(method: str, *args):
     Execute a single Redis command via the Upstash REST API.
     Returns the 'result' field of the JSON response, or raises RuntimeError.
     """
-    if not REDIS_URL or not REDIS_TOKEN:
-        raise RuntimeError("Upstash Redis env vars not configured")
+    url, token = _get_redis_creds()
+    if not url or not token:
+        raise RuntimeError(f"Upstash Redis env vars not configured: URL={'OK' if url else 'MISSING'}, TOKEN={'OK' if token else 'MISSING'}")
 
     path  = "/" + "/".join(urllib.parse.quote(str(a), safe="") for a in (method, *args))
-    url   = REDIS_URL + path
-    req   = urllib.request.Request(url, headers={"Authorization": f"Bearer {REDIS_TOKEN}"})
+    req   = urllib.request.Request(url + path, headers={"Authorization": f"Bearer {token}"})
     with urllib.request.urlopen(req, timeout=5) as resp:
         body = json.loads(resp.read())
     if "error" in body:
