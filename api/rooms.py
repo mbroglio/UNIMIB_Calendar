@@ -59,6 +59,17 @@ def get_buildings():
     _cache[url] = (time.time(), result)
     return result
 
+DAYS_IT = {
+    0: 'Lunedì', 1: 'Martedì', 2: 'Mercoledì', 3: 'Giovedì',
+    4: 'Venerdì', 5: 'Sabato', 6: 'Domenica'
+}
+
+MONTHS_IT = {
+    1: 'Gennaio', 2: 'Febbraio', 3: 'Marzo', 4: 'Aprile',
+    5: 'Maggio', 6: 'Giugno', 7: 'Luglio', 8: 'Agosto',
+    9: 'Settembre', 10: 'Ottobre', 11: 'Novembre', 12: 'Dicembre'
+}
+
 def parse_time_str(t_str):
     # parses "08:30:00" or "08:30" to minutes from midnight
     if not t_str:
@@ -78,7 +89,28 @@ def get_room_occupancy(sede, date_str, time_str=None):
     today_str = now_it.strftime('%d-%m-%Y')
     is_today = (date_str == today_str)
 
-    if time_str:
+    # Parse date to Italian format representations
+    date_clean = date_str.replace('/', '-')
+    dt_obj = None
+    try:
+        dt_obj = datetime.strptime(date_clean, '%d-%m-%Y')
+    except ValueError:
+        try:
+            dt_obj = datetime.strptime(date_clean, '%Y-%m-%d')
+        except ValueError:
+            pass
+
+    if dt_obj:
+        day_name = DAYS_IT.get(dt_obj.weekday(), '')
+        month_name = MONTHS_IT.get(dt_obj.month, '')
+        date_formatted = dt_obj.strftime('%d/%m/%Y')
+        date_long = f"{day_name} {dt_obj.day} {month_name} {dt_obj.year}"
+    else:
+        day_name = ''
+        date_formatted = date_str.replace('-', '/')
+        date_long = date_str
+
+    if time_str and time_str != 'all':
         check_mins = parse_time_str(time_str)
     elif is_today:
         check_mins = now_it.hour * 60 + now_it.minute
@@ -146,7 +178,6 @@ def get_room_occupancy(sede, date_str, time_str=None):
 
     # Prepare room list
     rooms_output = []
-    # If all_rooms_dict is empty, collect unique rooms from raw_events or raw['rooms']
     if not all_rooms_dict:
         rooms_meta = raw.get("rooms", {})
         for r_code, r_val in rooms_meta.items():
@@ -165,17 +196,31 @@ def get_room_occupancy(sede, date_str, time_str=None):
         except (ValueError, TypeError):
             capacity = 0
 
-        # Determine if room is free
         is_free = True
         current_event = None
         next_event = None
+        chained_next_event = None
+        occupied_from = None
+        occupied_until = None
         free_until = None
 
         if check_mins is not None:
-            for ev in evs:
+            for i, ev in enumerate(evs):
                 if ev["from_mins"] <= check_mins < ev["to_mins"]:
                     is_free = False
                     current_event = ev
+                    occupied_from = ev["from"]
+                    # Chain contiguous/consecutive events (start within 15 min of previous end)
+                    curr_end_mins = ev["to_mins"]
+                    curr_end = ev["to"]
+                    for j in range(i + 1, len(evs)):
+                        sub = evs[j]
+                        if sub["from_mins"] <= curr_end_mins + 15 and sub["to_mins"] > curr_end_mins:
+                            curr_end_mins = sub["to_mins"]
+                            curr_end = sub["to"]
+                            if chained_next_event is None:
+                                chained_next_event = sub
+                    occupied_until = curr_end
                     break
                 elif ev["from_mins"] > check_mins and next_event is None:
                     next_event = ev
@@ -186,8 +231,16 @@ def get_room_occupancy(sede, date_str, time_str=None):
                 else:
                     free_until = "fine giornata"
         else:
-            # If no time comparison, indicate whether room has ANY events today
+            # Whole-day overview
             is_free = (len(evs) == 0)
+            if evs:
+                occupied_from = evs[0]["from"]
+                occupied_until = evs[-1]["to"]
+                current_event = evs[0]
+                if len(evs) > 1:
+                    chained_next_event = evs[1]
+            else:
+                free_until = "fine giornata"
 
         rooms_output.append({
             "code": code,
@@ -196,6 +249,9 @@ def get_room_occupancy(sede, date_str, time_str=None):
             "is_free": is_free,
             "current_event": current_event,
             "next_event": next_event,
+            "chained_next_event": chained_next_event,
+            "occupied_from": occupied_from,
+            "occupied_until": occupied_until,
             "free_until": free_until,
             "events_count": len(evs),
             "events": evs
@@ -207,6 +263,9 @@ def get_room_occupancy(sede, date_str, time_str=None):
     return {
         "sede": sede,
         "date": date_str,
+        "date_formatted": date_formatted,
+        "date_long": date_long,
+        "day_name": day_name,
         "is_today": is_today,
         "check_time": format_minutes(check_mins) if check_mins is not None else None,
         "total_rooms": len(rooms_output),

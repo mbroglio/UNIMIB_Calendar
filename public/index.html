@@ -109,13 +109,30 @@
         </div>
 
         <div class="rooms-select-group">
-          <label for="roomsDateInput">📅 Data</label>
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+            <label for="roomsDateInput" style="margin-bottom:0;">📅 Data</label>
+            <span id="roomsDateDisplay" style="font-size: 0.78rem; font-weight: 600; color: var(--accent-cyan);"></span>
+          </div>
           <div class="rooms-date-nav">
             <button id="btnRoomsPrevDay" class="btn-icon" style="width:36px;height:36px;" title="Giorno precedente">◀</button>
             <input type="date" id="roomsDateInput">
             <button id="btnRoomsNextDay" class="btn-icon" style="width:36px;height:36px;" title="Giorno successivo">▶</button>
             <button id="btnRoomsToday" class="btn-secondary" style="width:auto;padding:8px 12px;font-size:0.8rem;font-weight:600;">Oggi</button>
           </div>
+        </div>
+      </div>
+
+      <!-- Time Filter Selector -->
+      <div style="margin-top: 10px; margin-bottom: 10px;">
+        <label style="font-size:0.75rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; margin-bottom:6px; display:block;">🕒 Orario di verifica</label>
+        <div id="roomsTimeBar" class="rooms-filter-pills" style="margin: 0;">
+          <button class="filter-pill active" data-time="now">⚡ In tempo reale</button>
+          <button class="filter-pill" data-time="09:00">09:00</button>
+          <button class="filter-pill" data-time="11:00">11:00</button>
+          <button class="filter-pill" data-time="13:00">13:00</button>
+          <button class="filter-pill" data-time="14:30">14:30</button>
+          <button class="filter-pill" data-time="16:30">16:30</button>
+          <button class="filter-pill" data-time="all">📅 Tutta la giornata</button>
         </div>
       </div>
 

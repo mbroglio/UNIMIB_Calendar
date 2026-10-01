@@ -22,6 +22,12 @@ DAYS_IT = {
     6: 'Domenica'
 }
 
+MONTHS_IT = {
+    1: 'Gennaio', 2: 'Febbraio', 3: 'Marzo', 4: 'Aprile',
+    5: 'Maggio', 6: 'Giugno', 7: 'Luglio', 8: 'Agosto',
+    9: 'Settembre', 10: 'Ottobre', 11: 'Novembre', 12: 'Dicembre'
+}
+
 def get_italy_now():
     tz_it = timezone(timedelta(hours=2))
     return datetime.now(tz_it)
@@ -79,11 +85,14 @@ def parse_exam_event(ev):
     raw_date = ev.get('Giorno', '')
     day_name = ''
     date_formatted = ''
+    date_long = ''
     if raw_date and re.fullmatch(r'\d{4}-\d{2}-\d{2}', raw_date):
         try:
             dt = datetime.strptime(raw_date, '%Y-%m-%d')
             day_name = DAYS_IT.get(dt.weekday(), '')
             date_formatted = dt.strftime('%d/%m/%Y')
+            m_name = MONTHS_IT.get(dt.month, '')
+            date_long = f"{day_name} {dt.day} {m_name} {dt.year}".strip()
         except ValueError:
             pass
 
@@ -95,6 +104,7 @@ def parse_exam_event(ev):
         'appello': appello_num,
         'date': raw_date,
         'date_formatted': date_formatted,
+        'date_long': date_long,
         'day_name': day_name,
         'from': ev.get('from', '')[:5],
         'to': ev.get('to', '')[:5],

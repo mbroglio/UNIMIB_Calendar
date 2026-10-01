@@ -25,6 +25,7 @@ let roomsState = {
   buildings: [],
   selectedBuilding: localStorage.getItem('unimib_rooms_building') || 'U06',
   selectedDate: '', // initialized in initApp
+  selectedTime: 'now', // 'now', '09:00', '11:00', '13:00', '14:30', '16:30', 'all'
   activeFilter: 'all', // 'all', 'free', 'occupied'
   searchQuery: '',
   data: null,
@@ -142,6 +143,7 @@ function setupEventListeners() {
   document.getElementById('roomsDateInput').addEventListener('change', (e) => {
     if (e.target.value) {
       roomsState.selectedDate = e.target.value;
+      updateRoomsDateDisplay();
       loadRoomsOccupancy();
     }
   });
@@ -165,6 +167,15 @@ function setupEventListeners() {
       pill.classList.add('active');
       roomsState.activeFilter = pill.getAttribute('data-filter') || 'all';
       renderRooms();
+    });
+  });
+
+  document.querySelectorAll('#roomsTimeBar .filter-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('#roomsTimeBar .filter-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      roomsState.selectedTime = pill.getAttribute('data-time') || 'now';
+      loadRoomsOccupancy();
     });
   });
 
@@ -904,7 +915,8 @@ function renderEvents() {
     const section = document.createElement('div');
     section.className = 'day-section';
 
-    section.innerHTML = `<div class="day-header-title">📌 ${escapeHtml(group.dayName)} ${escapeHtml(group.date)}</div>`;
+    const itDateTitle = formatDateItalianLong(group.date);
+    section.innerHTML = `<div class="day-header-title">📌 ${escapeHtml(itDateTitle)}</div>`;
 
     group.items.forEach(e => {
       const card = document.createElement('div');
@@ -1023,6 +1035,10 @@ function formatFormattedDate(d) {
 }
 
 const DAYS_NAMES_IT = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+const MONTHS_NAMES_IT = [
+  'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
+  'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'
+];
 
 function formatDateIso(d) {
   const year = d.getFullYear();
@@ -1044,13 +1060,45 @@ function isoToFormatted(iso) {
   return `${parts[2]}-${parts[1]}-${parts[0]}`;
 }
 
-function isoToDisplayDate(iso) {
-  if (!iso) return '';
-  const dt = isoToDate(iso);
+function parseAnyDate(d) {
+  if (!d) return new Date();
+  if (d instanceof Date) return d;
+  if (typeof d === 'string') {
+    if (d.includes('T')) return new Date(d);
+    const partsHyphen = d.split('-');
+    if (partsHyphen.length === 3) {
+      if (partsHyphen[0].length === 4) {
+        return new Date(Number(partsHyphen[0]), Number(partsHyphen[1]) - 1, Number(partsHyphen[2]));
+      } else {
+        return new Date(Number(partsHyphen[2]), Number(partsHyphen[1]) - 1, Number(partsHyphen[0]));
+      }
+    }
+    const partsSlash = d.split('/');
+    if (partsSlash.length === 3) {
+      return new Date(Number(partsSlash[2]), Number(partsSlash[1]) - 1, Number(partsSlash[0]));
+    }
+  }
+  return new Date(d);
+}
+
+function formatDateItalianLong(d) {
+  const dt = parseAnyDate(d);
+  if (!dt || isNaN(dt.getTime())) return String(d || '');
   const dayName = DAYS_NAMES_IT[dt.getDay()];
-  const d = String(dt.getDate()).padStart(2, '0');
-  const m = String(dt.getMonth() + 1).padStart(2, '0');
-  return `${dayName} ${d}/${m}/${dt.getFullYear()}`;
+  const mName = MONTHS_NAMES_IT[dt.getMonth()];
+  return `${dayName} ${dt.getDate()} ${mName} ${dt.getFullYear()}`;
+}
+
+function formatDateItalianShort(d) {
+  const dt = parseAnyDate(d);
+  if (!dt || isNaN(dt.getTime())) return String(d || '');
+  const day = String(dt.getDate()).padStart(2, '0');
+  const month = String(dt.getMonth() + 1).padStart(2, '0');
+  return `${day}/${month}/${dt.getFullYear()}`;
+}
+
+function isoToDisplayDate(iso) {
+  return formatDateItalianLong(iso);
 }
 
 // ---------- Tab Navigation Switcher ----------
@@ -1104,6 +1152,7 @@ async function loadRoomsBuildings() {
     }
 
     document.getElementById('roomsDateInput').value = roomsState.selectedDate;
+    updateRoomsDateDisplay();
     loadRoomsOccupancy();
   } catch (err) {
     console.error('Error loading buildings:', err);
@@ -1120,8 +1169,13 @@ async function loadRoomsOccupancy(forceRefresh = false) {
   grid.style.display = 'none';
 
   const apiDate = isoToFormatted(roomsState.selectedDate);
+  let timeParam = '';
+  if (roomsState.selectedTime && roomsState.selectedTime !== 'now') {
+    timeParam = `&time=${encodeURIComponent(roomsState.selectedTime)}`;
+  }
+
   try {
-    const data = await fetchJson(`/api/rooms?sede=${encodeURIComponent(roomsState.selectedBuilding)}&date=${encodeURIComponent(apiDate)}`);
+    const data = await fetchJson(`/api/rooms?sede=${encodeURIComponent(roomsState.selectedBuilding)}&date=${encodeURIComponent(apiDate)}${timeParam}`);
     roomsState.data = data;
     spinner.style.display = 'none';
     grid.style.display = 'grid';
@@ -1133,10 +1187,16 @@ async function loadRoomsOccupancy(forceRefresh = false) {
     document.getElementById('badgeRoomsFree').textContent = `🟢 ${data.free_rooms} libere`;
     document.getElementById('badgeRoomsOccupied').textContent = `🔴 ${data.occupied_rooms} occupate`;
 
-    const timeText = data.check_time ? ` · Ore ${data.check_time}` : '';
-    document.getElementById('roomsSummaryText').textContent = data.is_today 
-      ? `Stato in tempo reale${timeText}`
-      : `Occupazione per il ${data.date}`;
+    const dateDisplay = document.getElementById('roomsDateDisplay');
+    if (dateDisplay) {
+      dateDisplay.textContent = data.date_long || formatDateItalianLong(roomsState.selectedDate);
+    }
+
+    const dateLabel = data.date_long || formatDateItalianLong(roomsState.selectedDate);
+    const timeLabel = data.check_time ? ` · Ore ${data.check_time}` : (roomsState.selectedTime === 'all' ? ' · Tutta la giornata' : '');
+    document.getElementById('roomsSummaryText').textContent = data.is_today && (!roomsState.selectedTime || roomsState.selectedTime === 'now')
+      ? `Stato in tempo reale${timeLabel}`
+      : `${dateLabel}${timeLabel}`;
 
     renderRooms();
     if (forceRefresh) showToast('Occupazione aule aggiornata!');
@@ -1179,30 +1239,76 @@ function renderRooms() {
     return;
   }
 
-  grid.innerHTML = filtered.map(r => `
-    <div class="room-card ${r.is_free ? 'free' : 'occupied'}" data-code="${escapeHtml(r.code)}">
-      <div class="room-card-top">
-        <div>
-          <div class="room-card-title">${escapeHtml(r.name)}</div>
-          <div class="room-card-capacity">👥 ${r.capacity > 0 ? r.capacity + ' posti' : 'Capienza n/d'} · ${escapeHtml(r.code)}</div>
-        </div>
-        <div class="status-badge ${r.is_free ? 'free' : 'occupied'}">
-          <span class="status-indicator-dot"></span>
-          ${r.is_free ? 'LIBERA' : 'OCCUPATA'}
-        </div>
-      </div>
-      <div class="room-card-body">
-        ${r.is_free 
-          ? `<strong>Libera adesso</strong> · ${r.free_until === 'fine giornata' ? 'Tutto il giorno' : 'Fino alle ' + escapeHtml(r.free_until)}` 
-          : `<strong>Occupata fino alle ${escapeHtml(r.current_event ? r.current_event.to : '')}</strong><br><span style="color:var(--text-secondary);">${escapeHtml(r.current_event ? r.current_event.name : '')}</span>`
+  grid.innerHTML = filtered.map(r => {
+    const statusBadgeText = r.is_free ? 'LIBERA' : 'OCCUPATA';
+    let bodyHtml = '';
+
+    if (r.is_free) {
+      let freeHeading = '';
+      let freeSub = '';
+      if (r.free_until && r.free_until !== 'fine giornata') {
+        freeHeading = `Libera adesso · Fino alle ${escapeHtml(r.free_until)}`;
+        if (r.next_event) {
+          freeSub = `<div style="color:var(--text-secondary); font-size:0.8rem; margin-top:4px;">📖 Prossima: <strong>${escapeHtml(r.next_event.name)}</strong> (${escapeHtml(r.next_event.from)} - ${escapeHtml(r.next_event.to)})</div>`;
         }
+      } else if (r.events_count > 0) {
+        freeHeading = `Libera per il resto della giornata`;
+        freeSub = `<div style="color:var(--text-secondary); font-size:0.8rem; margin-top:4px;">Lezioni terminate per oggi (${r.events_count} svolte)</div>`;
+      } else {
+        freeHeading = `Libera tutta la giornata`;
+        freeSub = `<div style="color:var(--text-secondary); font-size:0.8rem; margin-top:4px;">Nessuna lezione o evento programmato</div>`;
+      }
+      bodyHtml = `<strong>${freeHeading}</strong>${freeSub}`;
+    } else {
+      // OCCUPIED
+      const untilTime = r.occupied_until || (r.current_event ? r.current_event.to : '');
+      const fromTime = r.occupied_from || (r.current_event ? r.current_event.from : '');
+      let occHeading = '';
+      if (untilTime && fromTime && roomsState.selectedTime === 'all') {
+        occHeading = `Occupata dalle ${escapeHtml(fromTime)} alle ${escapeHtml(untilTime)}`;
+      } else if (untilTime) {
+        occHeading = `Occupata fino alle ${escapeHtml(untilTime)}`;
+      } else if (fromTime) {
+        occHeading = `Occupata dalle ${escapeHtml(fromTime)}`;
+      } else {
+        occHeading = `Attualmente occupata`;
+      }
+
+      let currentSub = '';
+      if (r.current_event) {
+        currentSub += `<div style="color:#FFF; font-weight:600; margin-top:4px; font-size:0.85rem;">📖 In corso: ${escapeHtml(r.current_event.name)} <span style="color:var(--accent-purple); font-size:0.78rem;">(${escapeHtml(r.current_event.from)} - ${escapeHtml(r.current_event.to)})</span></div>`;
+        if (r.current_event.docenti && r.current_event.docenti.length) {
+          currentSub += `<div style="color:var(--text-secondary); font-size:0.78rem;">👤 ${escapeHtml(r.current_event.docenti.join(', '))}</div>`;
+        }
+      }
+      if (r.chained_next_event) {
+        currentSub += `<div style="color:var(--accent-cyan); font-size:0.78rem; margin-top:3px;">⏭️ A seguire: ${escapeHtml(r.chained_next_event.name)} (${escapeHtml(r.chained_next_event.from)} - ${escapeHtml(r.chained_next_event.to)})</div>`;
+      }
+      bodyHtml = `<strong style="color:var(--danger);">${occHeading}</strong>${currentSub}`;
+    }
+
+    return `
+      <div class="room-card ${r.is_free ? 'free' : 'occupied'}" data-code="${escapeHtml(r.code)}">
+        <div class="room-card-top">
+          <div>
+            <div class="room-card-title">${escapeHtml(r.name)}</div>
+            <div class="room-card-capacity">👥 ${r.capacity > 0 ? r.capacity + ' posti' : 'Capienza n/d'} · ${escapeHtml(r.code)}</div>
+          </div>
+          <div class="status-badge ${r.is_free ? 'free' : 'occupied'}">
+            <span class="status-indicator-dot"></span>
+            ${statusBadgeText}
+          </div>
+        </div>
+        <div class="room-card-body">
+          ${bodyHtml}
+        </div>
+        <div class="room-card-footer">
+          <span>${r.events_count} ${r.events_count === 1 ? 'lezione/evento oggi' : 'lezioni/eventi oggi'}</span>
+          <span>Tutte le lezioni ➔</span>
+        </div>
       </div>
-      <div class="room-card-footer">
-        <span>${r.events_count} ${r.events_count === 1 ? 'lezione/evento oggi' : 'lezioni/eventi oggi'}</span>
-        <span>Tutte le lezioni ➔</span>
-      </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 
   grid.querySelectorAll('.room-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -1213,9 +1319,15 @@ function renderRooms() {
   });
 }
 
+function updateRoomsDateDisplay() {
+  const el = document.getElementById('roomsDateDisplay');
+  if (el) el.textContent = formatDateItalianLong(roomsState.selectedDate);
+}
+
 function setRoomsDateToday() {
   roomsState.selectedDate = formatDateIso(new Date());
   document.getElementById('roomsDateInput').value = roomsState.selectedDate;
+  updateRoomsDateDisplay();
   loadRoomsOccupancy();
 }
 
@@ -1224,6 +1336,7 @@ function changeRoomsDate(deltaDays) {
   dt.setDate(dt.getDate() + deltaDays);
   roomsState.selectedDate = formatDateIso(dt);
   document.getElementById('roomsDateInput').value = roomsState.selectedDate;
+  updateRoomsDateDisplay();
   loadRoomsOccupancy();
 }
 
@@ -1467,7 +1580,7 @@ function renderExams() {
   container.innerHTML = Object.keys(groups).sort().map(dateKey => {
     const list = groups[dateKey];
     const first = list[0];
-    const dateHeader = `📅 ${first.day_name} ${first.date_formatted}`;
+    const dateHeader = `📅 ${first.date_long || formatDateItalianLong(first.date)} (${first.date_formatted || formatDateItalianShort(first.date)})`;
 
     const cardsHtml = list.map(ex => {
       const courseInfo = ex.courses && ex.courses.length ? ex.courses[0] : null;
