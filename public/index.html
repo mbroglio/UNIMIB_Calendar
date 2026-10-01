@@ -191,6 +191,12 @@
         <!-- Rendered dynamically -->
       </div>
 
+      <!-- Exam Filter Mode Toggle (All vs My Courses) -->
+      <div class="toggle-group" style="margin-bottom: 12px;">
+        <button id="btnExamFilterAll" class="toggle-btn active">📚 Tutti gli Appelli</button>
+        <button id="btnExamFilterTarget" class="toggle-btn">⭐ I Miei Corsi</button>
+      </div>
+
       <!-- Session Quick Pills -->
       <div>
         <label style="font-size:0.75rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; margin-bottom:6px; display:block;">🗓️ Sessione d'esame</label>
@@ -258,7 +264,10 @@
           <h3 style="font-size:1rem; color:var(--text-primary); margin:0 0 2px;">👥 Calendario Amici</h3>
           <p style="font-size:0.78rem; color:var(--text-secondary); margin:0;">Inserisci i codici dei tuoi amici per vedere i vostri orari combinati</p>
         </div>
-        <button id="btnAddFriend" class="btn-primary" style="width:auto; padding:8px 14px; font-size:0.82rem; white-space:nowrap;">+ Aggiungi</button>
+        <div style="display:flex; gap:8px;">
+          <button id="btnShareFriendsGroup" class="btn-secondary" style="width:auto; padding:8px 12px; font-size:0.82rem; white-space:nowrap;" title="Condividi link gruppo con amici">🔗 Condividi</button>
+          <button id="btnAddFriend" class="btn-primary" style="width:auto; padding:8px 14px; font-size:0.82rem; white-space:nowrap;">+ Aggiungi</button>
+        </div>
       </div>
 
       <!-- Friend chips list -->
@@ -448,8 +457,32 @@
     </button>
   </nav>
 
-  <!-- Notification Toast -->
-  <div id="toastNotification" class="toast">Messaggio</div>
+  <!-- Welcome / Onboarding Modal (shown on first visit) -->
+  <div id="onboardingModal" class="modal-overlay">
+    <div class="modal-content setup-content" style="max-width: 440px; text-align: center;">
+      <div style="font-size: 3rem; margin-bottom: 8px;">🎓</div>
+      <h2 style="font-size: 1.35rem; color: #FFF; margin-bottom: 8px;">Benvenuto su UNIMIB Orari</h2>
+      <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.5;">
+        Visualizza l'orario delle lezioni, l'occupazione delle aule in tempo reale e il calendario degli esami.
+      </p>
+
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <button id="btnOnboardingCreate" class="btn-primary" style="padding: 12px; font-size: 0.95rem; font-weight: 600;">
+          ✨ Crea il tuo profilo
+        </button>
+        <button id="btnOnboardingLogin" class="btn-secondary" style="padding: 12px; font-size: 0.95rem; font-weight: 600;">
+          🔑 Ho già un Codice Calendario
+        </button>
+        <button id="btnOnboardingGuest" class="btn-secondary" style="padding: 12px; font-size: 0.9rem; opacity: 0.85; border-style: dashed;">
+          👤 Continua come ospite
+        </button>
+      </div>
+
+      <p style="font-size: 0.72rem; color: var(--text-muted); margin-top: 16px; line-height: 1.4;">
+        Il profilo ti permette di sincronizzare il tuo piano di studi su più dispositivi e condividere il calendario con gli amici. Nessuna email o password richiesta.
+      </p>
+    </div>
+  </div>
 
   <!-- Profile Modal -->
   <div id="profileModal" class="modal-overlay">

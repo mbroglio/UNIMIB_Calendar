@@ -2,8 +2,8 @@
 UNIMIB Calendar – Shared Calendar API
 ======================================
 Returns the combined timetable of multiple students by fetching
-each student's profile from Redis and then querying UNIMIB for
-their individual timetable.
+each student's profile from Redis and then calling /api/calendar
+for their individual timetable.
 
 GET /api/shared_calendar?ids=ID1,ID2,ID3&date=DD-MM-YYYY
 
@@ -35,12 +35,12 @@ import json
 import urllib.request
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
+from datetime import datetime, timedelta
 
 REDIS_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
 REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 
-# Base URL for UNIMIB EasyCourse grid
-GRID_BASE = "https://gestioneorari.didattica.unimib.it/PortaleStudentiUnimib/index.php?view=easycourse&_lang=it"
+GRID_URL = 'https://gestioneorari.didattica.unimib.it/PortaleStudentiUnimib/grid_call.php'
 
 # Distinct colors for each student in the shared view
 SHARED_COLORS = [
@@ -57,8 +57,8 @@ MAX_PROFILES = 8  # safety cap
 def _redis_get(key: str):
     if not REDIS_URL or not REDIS_TOKEN:
         raise RuntimeError("Upstash Redis env vars not configured")
-    path  = "/GET/" + urllib.parse.quote(key, safe="")
-    req   = urllib.request.Request(
+    path = "/GET/" + urllib.parse.quote(key, safe="")
+    req  = urllib.request.Request(
         REDIS_URL + path,
         headers={"Authorization": f"Bearer {REDIS_TOKEN}"}
     )
@@ -70,71 +70,60 @@ def _redis_get(key: str):
     return json.loads(raw) if raw else None
 
 
-# ── UNIMIB grid fetch ──────────────────────────────────────────────────────────
+# ── UNIMIB grid fetch (same logic as calendar.py) ─────────────────────────────
+
+def _get_monday(date_str: str) -> str:
+    """Given DD-MM-YYYY, return the Monday of that week in DD-MM-YYYY."""
+    try:
+        dt = datetime.strptime(date_str, "%d-%m-%Y")
+    except ValueError:
+        dt = datetime.now()
+    monday = dt - timedelta(days=dt.weekday())
+    return monday.strftime("%d-%m-%Y")
+
 
 def _fetch_events(cfg: dict, date_str: str) -> list:
     """
     Fetch the weekly timetable events for a given config + week.
-    Returns a list of event dicts (same structure as api/calendar.py).
+    Mirrors the logic in api/calendar.py exactly.
     """
-    anno    = cfg.get("anno", "")
-    corso   = cfg.get("corso", "")
-    anni    = cfg.get("anni", [])
+    anno   = cfg.get("anno", "")
+    corso  = cfg.get("corso", "")
+    anni   = cfg.get("anni", [])
     if not anno or not corso or not anni:
         return []
 
-    params = {
-        "form-type": "corso",
-        "aa":        anno,
-        "corso":     corso,
-        "date":      date_str,
-        "periodo_didattico": ""
-    }
-    for a in anni:
-        params.setdefault("anno2[]", [])
-        if isinstance(params["anno2[]"], list):
-            params["anno2[]"].append(a)
-        else:
-            params["anno2[]"] = [params["anno2[]"], a]
-
-    # Build query string manually to support repeated anno2[]
-    qs_parts = []
-    for k, v in params.items():
-        if k == "anno2[]":
-            for av in (v if isinstance(v, list) else [v]):
-                qs_parts.append(f"anno2[]={urllib.parse.quote(str(av))}")
-        else:
-            qs_parts.append(f"{k}={urllib.parse.quote(str(v))}")
-    url = f"{GRID_BASE}&{'&'.join(qs_parts)}&include=grid_call"
-
+    params = [
+        ("view",      "easycourse"),
+        ("form-type", "corso"),
+        ("include",   "corso"),
+        ("anno",      anno),
+        ("corso",     corso),
+        *[("anno2[]", a) for a in anni],
+        ("date",      date_str),
+        ("_lang",     "it"),
+    ]
+    url = f"{GRID_URL}?{urllib.parse.urlencode(params)}"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     try:
-        req  = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-        data = json.loads(raw)
+            raw_data = json.loads(resp.read().decode("utf-8"))
     except Exception:
         return []
 
-    events_raw = data if isinstance(data, list) else data.get("celle", [])
-    events     = []
-    for e in events_raw:
-        name      = e.get("titolo_lezione") or e.get("corso") or ""
-        code      = e.get("codice_insegnamento") or e.get("corso_id") or ""
-        aula      = e.get("aula") or ""
-        docente   = e.get("docente") or ""
-        date_val  = e.get("data") or ""
-        start     = e.get("ora_inizio") or e.get("start") or ""
-        end_val   = e.get("ora_fine") or e.get("end") or ""
-        if not name or not date_val:
-            continue
+    celle  = sorted(raw_data.get("celle", []), key=lambda c: (c.get("timestamp") or 0))
+    events = []
+    for c in celle:
         events.append({
-            "date":        date_val,
-            "start_time":  start,
-            "end_time":    end_val,
-            "course":      name,
-            "course_code": code,
-            "aula":        aula,
-            "docente":     docente
+            "date":        c.get("data", ""),
+            "day_name":    c.get("nome_giorno", "").capitalize(),
+            "start_time":  c.get("ora_inizio", ""),
+            "end_time":    c.get("ora_fine", ""),
+            "course":      c.get("nome_insegnamento", "").strip(),
+            "course_code": c.get("codice_insegnamento", ""),
+            "aula":        c.get("aula", "").strip(),
+            "docente":     c.get("docente", "").strip(),
+            "is_canceled": c.get("Annullato") == "1",
         })
     return events
 
@@ -166,10 +155,15 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         qs   = self._qs()
         ids  = [i.strip().upper() for i in qs.get("ids", "").split(",") if i.strip()][:MAX_PROFILES]
-        date = qs.get("date", "")  # DD-MM-YYYY
+        date = qs.get("date", "").strip()  # DD-MM-YYYY
 
         if not ids:
             return self._send_json(400, {"error": "ids parameter required"})
+
+        # Normalise date to the Monday of the requested week
+        if not date:
+            date = datetime.now().strftime("%d-%m-%Y")
+        monday = _get_monday(date)
 
         profiles_out = []
         all_events   = []
@@ -177,8 +171,8 @@ class handler(BaseHTTPRequestHandler):
         for idx, pid in enumerate(ids):
             try:
                 profile = _redis_get(f"profile:{pid}")
-            except Exception as e:
-                continue  # skip profiles we can't reach
+            except Exception:
+                continue
             if not profile:
                 continue
 
@@ -188,29 +182,27 @@ class handler(BaseHTTPRequestHandler):
 
             profiles_out.append({"id": pid, "nickname": nickname, "color": color})
 
-            # Use provided date or default to today-ish in UNIMIB format
-            fetch_date = date or "today"
-            events     = _fetch_events(cfg, fetch_date)
+            events = _fetch_events(cfg, monday)
             for ev in events:
                 ev["profile_id"] = pid
                 ev["nickname"]   = nickname
                 ev["color"]      = color
             all_events.extend(events)
 
-        # Sort events: date, start_time
+        # Sort: date (DD-MM-YYYY → YYYY-MM-DD for lexicographic sort) then time
         def _sort_key(e):
-            # date is DD-MM-YYYY → convert to YYYY-MM-DD for sorting
             d = e.get("date", "")
             parts = d.split("-")
-            if len(parts) == 3:
+            if len(parts) == 3 and len(parts[2]) == 4:
                 d = f"{parts[2]}-{parts[1]}-{parts[0]}"
-            return (d, e.get("start_time", ""))
+            return (d, e.get("start_time", ""), e.get("nickname", ""))
 
         all_events.sort(key=_sort_key)
 
         return self._send_json(200, {
             "profiles": profiles_out,
-            "events":   all_events
+            "events":   all_events,
+            "week":     monday
         })
 
     def log_message(self, *args):

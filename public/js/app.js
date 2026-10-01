@@ -43,6 +43,7 @@ let roomsState = {
 let examsState = {
   extraCourses: [], // initialized in initApp from localStorage
   activeSession: 'upcoming', // 'upcoming', 'winter', 'summer', 'autumn', 'custom'
+  filterMode: 'all', // 'all', 'target' (only followed courses)
   yearFilter: '',
   searchQuery: '',
   exams: [],
@@ -95,14 +96,24 @@ function initApp() {
   state.config = loadConfig();
 
   const shared = readSharedConfig();
+  const urlParams = new URLSearchParams(window.location.search);
+  const groupParam = urlParams.get('group');
+
   if (shared) {
     enterPreview(shared);
+  } else if (groupParam) {
+    handleSharedGroupUrl(groupParam);
   } else if (state.config) {
     applyConfig();
     loadCalendar(state.currentMonday);
   } else {
-    showWelcome();
-    openSetup();
+    const guestChosen = localStorage.getItem('unimib_guest_chosen');
+    if (!profileState.id && !guestChosen) {
+      openOnboardingModal();
+    } else {
+      showWelcome();
+      openSetup();
+    }
   }
 }
 
@@ -134,6 +145,7 @@ function setupEventListeners() {
 
   // Friends / shared calendar buttons
   document.getElementById('btnAddFriend').addEventListener('click', openAddFriendModal);
+  document.getElementById('btnShareFriendsGroup').addEventListener('click', shareFriendsGroup);
   document.getElementById('btnCloseAddFriend').addEventListener('click', () => {
     document.getElementById('addFriendModal').classList.remove('active');
   });
@@ -153,6 +165,14 @@ function setupEventListeners() {
     friendsState.currentMonday = formatFormattedDate(getMonday(new Date()));
     loadFriendsCalendar();
   });
+
+  // Onboarding Modal listeners
+  const btnOnbCreate = document.getElementById('btnOnboardingCreate');
+  if (btnOnbCreate) btnOnbCreate.addEventListener('click', handleOnboardingCreate);
+  const btnOnbLogin = document.getElementById('btnOnboardingLogin');
+  if (btnOnbLogin) btnOnbLogin.addEventListener('click', handleOnboardingLogin);
+  const btnOnbGuest = document.getElementById('btnOnboardingGuest');
+  if (btnOnbGuest) btnOnbGuest.addEventListener('click', handleOnboardingGuest);
 
   // Filter Toggle
   document.getElementById('btnFilterTarget').addEventListener('click', () => {
@@ -266,6 +286,11 @@ function setupEventListeners() {
   document.getElementById('btnOpenAddExamCourse').addEventListener('click', openAddExamCourseModal);
   document.getElementById('btnCloseAddExamCourse').addEventListener('click', closeAddExamCourseModal);
   document.getElementById('btnConfirmAddExamCourse').addEventListener('click', confirmAddExamCourse);
+
+  const btnExamAll = document.getElementById('btnExamFilterAll');
+  if (btnExamAll) btnExamAll.addEventListener('click', () => setExamFilter('all'));
+  const btnExamTarget = document.getElementById('btnExamFilterTarget');
+  if (btnExamTarget) btnExamTarget.addEventListener('click', () => setExamFilter('target'));
 
   document.getElementById('addExamCourseArea').addEventListener('change', onAddExamCourseAreaChange);
   document.getElementById('addExamCourseSelect').addEventListener('change', onAddExamCourseSelectChange);
@@ -400,6 +425,10 @@ function saveConfig(cfg) {
     localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
   } catch (e) {
     console.warn('Config save error', e);
+  }
+  // Background sync to cloud profile if logged in and PIN is in session memory
+  if (profileState.id && profileState._pin) {
+    _syncConfigToProfile().catch(e => console.warn('Profile sync error:', e));
   }
 }
 
@@ -1518,6 +1547,9 @@ function saveExamCourses(courses) {
   } catch (e) {
     console.warn('Error saving exam courses', e);
   }
+  if (profileState.id && profileState._pin) {
+    _syncConfigToProfile().catch(e => console.warn('Profile sync error:', e));
+  }
 }
 
 function getActiveExamCourses() {
@@ -1660,14 +1692,67 @@ async function loadExams(forceRefresh = false) {
   }
 }
 
+function setExamFilter(filterType) {
+  examsState.filterMode = filterType;
+  const btnAll = document.getElementById('btnExamFilterAll');
+  const btnTarget = document.getElementById('btnExamFilterTarget');
+  if (btnAll) btnAll.classList.toggle('active', filterType === 'all');
+  if (btnTarget) btnTarget.classList.toggle('active', filterType === 'target');
+  renderExams();
+}
+
 function renderExams() {
   const container = document.getElementById('examsContainer');
-  if (!examsState.exams || examsState.exams.length === 0) {
+  let list = examsState.exams || [];
+
+  if (examsState.filterMode === 'target') {
+    const favorites = (state.config && state.config.favorites) || [];
+    if (!favorites.length) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">⭐</div>
+          <h3>Nessun corso seguito selezionato</h3>
+          <p>Non hai ancora scelto i tuoi insegnamenti seguiti nelle impostazioni del corso di studio. Vai su ⚙️ per selezionarli, oppure visualizza tutti gli appelli del corso.</p>
+          <button class="btn-primary" style="margin-top:15px; width:auto;" onclick="openSetup()">⚙️ Seleziona i tuoi corsi</button>
+        </div>
+      `;
+      const countEl = document.getElementById('examsCountText');
+      if (countEl) countEl.textContent = '0 appelli trovati (filtro: I Miei Corsi)';
+      return;
+    }
+
+    list = list.filter(ex => {
+      const exName = (ex.name || '').toLowerCase();
+      const exDesc = (ex.description || '').toLowerCase();
+      return favorites.some(fav => {
+        const fCode = (fav.code || '').toLowerCase();
+        const fLabel = (fav.label || '').toLowerCase();
+        if (fCode && (exName.includes(fCode) || exDesc.includes(fCode))) return true;
+        if (fLabel && (exName.includes(fLabel) || fLabel.includes(exName))) return true;
+        const stripNoise = s => s.replace(/\b(corso|di|e|ed|il|la|del|della|dei|delle|lab|laboratorio|modulo|avanzato|base|1|2|i|ii)\b/gi, '').replace(/\s+/g, ' ').trim();
+        const cleanF = stripNoise(fLabel);
+        const cleanE = stripNoise(exName);
+        if (cleanF.length >= 4 && cleanE.includes(cleanF)) return true;
+        if (cleanE.length >= 4 && cleanF.includes(cleanE)) return true;
+        return false;
+      });
+    });
+  }
+
+  const countEl = document.getElementById('examsCountText');
+  if (countEl) {
+    const suffix = examsState.filterMode === 'target' ? ' (I Miei Corsi)' : '';
+    countEl.textContent = `${list.length} ${list.length === 1 ? 'appello trovato' : 'appelli trovati'}${suffix}`;
+  }
+
+  if (list.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">🔍</div>
         <h3>Nessun appello trovato</h3>
-        <p>Nessun esame programmato nel periodo selezionato per i corsi monitorati. Prova a selezionare un'altra sessione o verificare i filtri.</p>
+        <p>${examsState.filterMode === 'target' 
+          ? 'Nessun appello trovato per i tuoi corsi seguiti nel periodo selezionato. Prova a selezionare "Tutti gli Appelli" o un\'altra sessione.' 
+          : 'Nessun esame programmato nel periodo selezionato per i corsi monitorati. Prova a selezionare un\'altra sessione o verificare i filtri.'}</p>
       </div>
     `;
     return;
@@ -1675,7 +1760,7 @@ function renderExams() {
 
   // Group exams by date
   const groups = {};
-  examsState.exams.forEach(ex => {
+  list.forEach(ex => {
     const key = ex.date;
     if (!groups[key]) groups[key] = [];
     groups[key].push(ex);
@@ -2020,9 +2105,14 @@ async function handleCreateProfile() {
     profileState.id       = data.id;
     profileState.nickname = data.nickname;
     profileState.lastSync = Date.now();
+    profileState._pin     = pin;  // session-only, for background auto-sync
     saveProfileLocally();
     renderProfileModal();
     showToast(`Profilo creato! Il tuo codice è: ${data.id}`);
+    setTimeout(() => {
+      document.getElementById('profileModal').classList.remove('active');
+      if (!state.config) openSetup();
+    }, 1200);
   } catch (e) {
     errEl.textContent = 'Errore di connessione. Riprova.';
     errEl.style.display = '';
@@ -2091,9 +2181,14 @@ async function handleLoginProfile() {
     profileState.id       = data.id;
     profileState.nickname = data.nickname;
     profileState.lastSync = Date.now();
+    profileState._pin     = pin;  // session-only, for background auto-sync
     saveProfileLocally();
     renderProfileModal();
     showToast(`Bentornato, ${data.nickname}! 👋`);
+    setTimeout(() => {
+      document.getElementById('profileModal').classList.remove('active');
+      if (!state.config) openSetup();
+    }, 1200);
   } catch (e) {
     errEl.textContent = 'Errore di connessione. Riprova.';
     errEl.style.display = '';
@@ -2107,6 +2202,7 @@ function handleLogoutProfile() {
   profileState.id       = null;
   profileState.nickname = '';
   profileState.lastSync = null;
+  profileState._pin     = null;  // clear session PIN
   saveProfileLocally();
   renderProfileModal();
   showToast('Profilo rimosso da questo dispositivo');
@@ -2136,18 +2232,23 @@ async function syncProfileNow() {
   text.textContent = 'Sincronizzazione...';
 
   try {
-    // We don't store the PIN in memory, so for auto-sync we need a stored PIN.
-    // Fallback: just GET the profile to show it's reachable
-    const resp = await fetch(`/api/profile?id=${profileState.id}`);
-    const data = await resp.json();
-    if (resp.ok) {
-      profileState.lastSync = Date.now();
-      saveProfileLocally();
+    if (profileState._pin) {
+      // Full sync: push current config to server
+      await _syncConfigToProfile();
       text.textContent = `Sincronizzato alle ${new Date().toLocaleTimeString('it-IT')}`;
-      showToast('Profilo raggiungibile ✅');
+      showToast('Profilo sincronizzato ✅');
     } else {
-      text.textContent = 'Profilo non trovato sul server';
+      // No PIN in session: just verify the profile is reachable
+      const resp = await fetch(`/api/profile?id=${profileState.id}`);
+      if (resp.ok) {
+        text.textContent = `Raggiungibile (riaccedi per sincronizzare i dati)`;
+        showToast('Profilo raggiungibile ✅');
+      } else {
+        text.textContent = 'Profilo non trovato sul server';
+      }
     }
+    profileState.lastSync = Date.now();
+    saveProfileLocally();
   } catch (e) {
     text.textContent = 'Errore di connessione';
   } finally {
@@ -2155,10 +2256,26 @@ async function syncProfileNow() {
   }
 }
 
-// Sync config to server (called automatically on saveConfig if logged in + PIN available)
-// NOTE: For silent auto-sync, we require the PIN stored in session memory.
-// Since we do NOT store the PIN persistently, auto-sync happens only during
-// the login session. A "Sincronizza" button triggers a GET to verify connectivity.
+/**
+ * Background sync: push current config + exam courses to the cloud profile.
+ * Requires profileState._pin to be set (session memory only).
+ */
+async function _syncConfigToProfile() {
+  if (!profileState.id || !profileState._pin) return;
+  const resp = await fetch(`/api/profile?id=${profileState.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      pin:          profileState._pin,
+      config:       state.config || null,
+      exam_courses: examsState.extraCourses || []
+    })
+  });
+  if (resp.ok) {
+    profileState.lastSync = Date.now();
+    saveProfileLocally();
+  }
+}
 
 
 // ══════════════════════════════════════════════════════════════
@@ -2493,4 +2610,118 @@ function renderFriendsView() {
 function dateFormattedToIso(ddmmyyyy) {
   const p = ddmmyyyy.split('-');
   return p.length === 3 ? `${p[2]}-${p[1]}-${p[0]}` : ddmmyyyy;
+}
+
+// ══════════════════════════════════════════════════════════════
+//  FIRST VISIT ONBOARDING MODAL
+// ══════════════════════════════════════════════════════════════
+
+function openOnboardingModal() {
+  const modal = document.getElementById('onboardingModal');
+  if (modal) modal.classList.add('active');
+}
+
+function closeOnboardingModal() {
+  const modal = document.getElementById('onboardingModal');
+  if (modal) modal.classList.remove('active');
+}
+
+function handleOnboardingCreate() {
+  closeOnboardingModal();
+  openProfileModal();
+  showProfileTab('create');
+}
+
+function handleOnboardingLogin() {
+  closeOnboardingModal();
+  openProfileModal();
+  showProfileTab('login');
+}
+
+function handleOnboardingGuest() {
+  localStorage.setItem('unimib_guest_chosen', '1');
+  closeOnboardingModal();
+  showWelcome();
+  openSetup();
+}
+
+
+// ══════════════════════════════════════════════════════════════
+//  SHARED GROUP LINK (Import & Share URL)
+// ══════════════════════════════════════════════════════════════
+
+async function handleSharedGroupUrl(groupStr) {
+  const ids = groupStr.split(',')
+    .map(i => i.trim().toUpperCase())
+    .filter(i => /^[A-Z0-9]{8}$/.test(i));
+
+  if (!ids.length) return;
+
+  showToast('Caricamento gruppo amici... 👥');
+
+  for (const id of ids) {
+    if (!friendsState.friends.some(f => f.id === id) && id !== profileState.id) {
+      try {
+        const resp = await fetch(`/api/profile?id=${id}`);
+        if (resp.ok) {
+          const profile = await resp.json();
+          const colorIndex = friendsState.friends.length % FRIENDS_COLORS.length;
+          friendsState.friends.push({
+            id: profile.id,
+            nickname: profile.nickname || id,
+            color: FRIENDS_COLORS[colorIndex]
+          });
+        }
+      } catch (err) {
+        console.warn('Error fetching group profile:', id, err);
+      }
+    }
+  }
+
+  saveFriends(friendsState.friends);
+  renderFriendChips();
+  // Clean URL without reloading page
+  history.replaceState(null, '', window.location.pathname);
+  switchTab('friends');
+  loadFriendsCalendar();
+  showToast('Gruppo amici caricato nel calendario! 🎉');
+}
+
+function shareFriendsGroup() {
+  if (!friendsState.friends.length && !profileState.id) {
+    showToast('Aggiungi prima degli amici al calendario per condividere il gruppo');
+    return;
+  }
+  const ids = [];
+  if (profileState.id) ids.push(profileState.id);
+  friendsState.friends.forEach(f => {
+    if (!ids.includes(f.id)) ids.push(f.id);
+  });
+
+  const url = `${window.location.origin}/?group=${ids.join(',')}`;
+
+  if (navigator.share) {
+    navigator.share({
+      title: 'Calendario Amici UNIMIB',
+      text: 'Unisciti al nostro calendario condiviso UNIMIB per confrontare gli orari!',
+      url: url
+    }).catch(err => {
+      if (err.name !== 'AbortError') copyGroupUrlToClipboard(url);
+    });
+  } else {
+    copyGroupUrlToClipboard(url);
+  }
+}
+
+function copyGroupUrlToClipboard(url) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(url).then(() => {
+      showToast('Link gruppo copiato negli appunti! 📋');
+    }).catch(() => {
+      prompt('Copia questo link da inviare ai tuoi amici:', url);
+    });
+  } else {
+    legacyCopy(url);
+    showToast('Link gruppo copiato! 📋');
+  }
 }
