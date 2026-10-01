@@ -23,10 +23,9 @@ GET  /api/profile?lookup=<NICKNAME>        – find profile IDs by nickname (ret
 
 import os
 import json
+import re
 import hashlib
-import secrets
 import time
-import string
 import urllib.request
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
@@ -46,8 +45,6 @@ def _get_redis_creds():
     ).strip().strip('"').strip("'")
     return url, token
 
-ID_CHARS   = string.ascii_uppercase + string.digits   # A-Z 0-9
-ID_LENGTH  = 8
 MAX_LOOKUP = 10  # max results for nickname lookup
 
 
@@ -110,15 +107,13 @@ def _remove_from_nick_index(old_nickname: str, profile_id: str):
         redis_del(key)
 
 
-# ── ID / PIN helpers ───────────────────────────────────────────────────────────
-
-def _gen_id() -> str:
-    return "".join(secrets.choice(ID_CHARS) for _ in range(ID_LENGTH))
+def _clean_nickname(n: str) -> str:
+    return re.sub(r'[^A-Za-z0-9_-]', '', n.strip()).lower()
 
 
 def _hash_pin(pin: str, profile_id: str) -> str:
     """SHA-256 of (pin + ":" + id) – salted with the profile id."""
-    raw = f"{pin}:{profile_id}".encode()
+    raw = f"{pin}:{profile_id.lower()}".encode()
     return hashlib.sha256(raw).hexdigest()
 
 
@@ -137,7 +132,7 @@ def _valid_pin(p) -> bool:
 
 
 def _valid_id(i) -> bool:
-    return isinstance(i, str) and len(i) == ID_LENGTH and all(c in ID_CHARS for c in i.upper())
+    return isinstance(i, str) and 3 <= len(i.strip()) <= 40 and bool(re.fullmatch(r'[A-Za-z0-9_-]+', i.strip()))
 
 
 def _public_profile(profile: dict) -> dict:
@@ -194,15 +189,15 @@ class handler(BaseHTTPRequestHandler):
                 return self._send_json(200, {"results": results})
 
             # ── Fetch profile by ID ────────────────────────────────────────
-            pid = qs.get("id", "").strip().upper()
+            pid = qs.get("id", "").strip().lower()
             if not pid:
                 return self._send_json(400, {"error": "Missing id or lookup parameter"})
             if not _valid_id(pid):
-                return self._send_json(400, {"error": "Invalid profile ID"})
+                return self._send_json(400, {"error": "ID profilo non valido"})
 
             profile = redis_get(f"profile:{pid}")
             if not profile:
-                return self._send_json(404, {"error": "Profile not found"})
+                return self._send_json(404, {"error": "Profilo non trovato"})
             return self._send_json(200, _public_profile(profile))
 
         except Exception as e:
@@ -213,20 +208,25 @@ class handler(BaseHTTPRequestHandler):
         try:
             body = self._read_body()
             nickname    = str(body.get("nickname", "")).strip()
-            pin         = str(body.get("pin", ""))
+            pin         = str(body.get("pin", "")).strip()
             config      = body.get("config")
             exam_courses = body.get("exam_courses", [])
 
             if not _valid_nickname(nickname):
                 return self._send_json(400, {"error": "Nickname non valido (1-30 caratteri)"})
             if not _valid_pin(pin):
-                return self._send_json(400, {"error": "PIN non valido (4-8 cifre)"})
+                return self._send_json(400, {"error": "PIN non valido (4-8 cifre numeriche)"})
 
-            # Generate a unique ID (retry up to 5 times on collision)
-            for _ in range(5):
-                pid = _gen_id()
-                if not redis_get(f"profile:{pid}"):
-                    break
+            clean_nick = _clean_nickname(nickname)
+            if not clean_nick:
+                return self._send_json(400, {"error": "Il soprannome deve contenere lettere o cifre"})
+
+            pid = f"{clean_nick}{pin}"
+
+            if redis_get(f"profile:{pid}"):
+                return self._send_json(409, {
+                    "error": f"Esiste già un profilo per '{nickname}' con questo PIN. Se è il tuo, passa alla scheda Accedi."
+                })
 
             profile = {
                 "id":           pid,
@@ -248,13 +248,13 @@ class handler(BaseHTTPRequestHandler):
         """Update an existing profile (PIN required)."""
         try:
             qs  = self._qs()
-            pid = qs.get("id", "").strip().upper()
+            pid = qs.get("id", "").strip().lower()
             if not _valid_id(pid):
                 return self._send_json(400, {"error": "ID profilo non valido"})
 
             profile = redis_get(f"profile:{pid}")
             if not profile:
-                return self._send_json(404, {"error": "Profilo non trovato"})
+                return self._send_json(404, {"error": "Profilo non trovato. Verifica soprannome e PIN."})
 
             body = self._read_body()
             pin  = str(body.get("pin", ""))

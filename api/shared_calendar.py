@@ -167,7 +167,7 @@ class handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         qs   = self._qs()
-        ids  = [i.strip().upper() for i in qs.get("ids", "").split(",") if i.strip()][:MAX_PROFILES]
+        ids  = [i.strip().lower() for i in qs.get("ids", "").split(",") if i.strip()][:MAX_PROFILES]
         date = qs.get("date", "").strip()  # DD-MM-YYYY
 
         if not ids:

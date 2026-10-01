@@ -2033,6 +2033,8 @@ function renderProfileModal() {
   if (loggedIn) {
     document.getElementById('profileDisplayNickname').textContent = profileState.nickname;
     document.getElementById('profileDisplayId').textContent       = profileState.id;
+    const hintEl = document.getElementById('profileDisplayCodeHint');
+    if (hintEl) hintEl.textContent = profileState.id;
     document.getElementById('profileSyncText').textContent        = profileState.lastSync
       ? `Sincronizzato il ${new Date(profileState.lastSync).toLocaleTimeString('it-IT')}`
       : 'Non ancora sincronizzato';
@@ -2043,7 +2045,8 @@ function renderProfileModal() {
     document.getElementById('profilePin').value         = '';
     document.getElementById('profilePinConfirm').value  = '';
     document.getElementById('profileCreateError').style.display = 'none';
-    document.getElementById('profileLoginId').value     = '';
+    const loginNickEl = document.getElementById('profileLoginNickname');
+    if (loginNickEl) loginNickEl.value = '';
     document.getElementById('profileLoginPin').value    = '';
     document.getElementById('profileLoginError').style.display  = 'none';
   }
@@ -2123,21 +2126,25 @@ async function handleCreateProfile() {
 }
 
 async function handleLoginProfile() {
-  const id   = document.getElementById('profileLoginId').value.trim().toUpperCase();
-  const pin  = document.getElementById('profileLoginPin').value;
+  const nickEl = document.getElementById('profileLoginNickname');
+  const nick = nickEl ? nickEl.value.trim() : '';
+  const pin  = document.getElementById('profileLoginPin').value.trim();
   const errEl = document.getElementById('profileLoginError');
 
   errEl.style.display = 'none';
-  if (id.length !== 8) {
-    errEl.textContent = 'Il Codice Calendario è di 8 caratteri.';
+  if (!nick) {
+    errEl.textContent = 'Inserisci il tuo soprannome.';
     errEl.style.display = '';
     return;
   }
   if (!pin) {
-    errEl.textContent = 'Inserisci il PIN.';
+    errEl.textContent = 'Inserisci il tuo PIN.';
     errEl.style.display = '';
     return;
   }
+
+  const cleanNick = nick.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  const id = `${cleanNick}${pin}`;
 
   const btn = document.getElementById('btnLoginProfile');
   btn.disabled = true;
@@ -2145,7 +2152,7 @@ async function handleLoginProfile() {
 
   try {
     // Verify by attempting a PUT with the config — the server validates the PIN
-    const resp = await fetch(`/api/profile?id=${id}`, {
+    const resp = await fetch(`/api/profile?id=${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2155,6 +2162,11 @@ async function handleLoginProfile() {
       })
     });
     const data = await resp.json();
+    if (resp.status === 404) {
+      errEl.textContent = 'Nessun profilo trovato per questo soprannome e PIN.';
+      errEl.style.display = '';
+      return;
+    }
     if (resp.status === 403) {
       errEl.textContent = 'PIN non corretto.';
       errEl.style.display = '';
@@ -2319,7 +2331,7 @@ function showFriendTab(tab) {
 }
 
 async function lookupFriendByCode() {
-  const id     = document.getElementById('friendCodeInput').value.trim().toUpperCase();
+  const id     = document.getElementById('friendCodeInput').value.trim().toLowerCase();
   const errEl  = document.getElementById('friendCodeError');
   const prev   = document.getElementById('friendCodePreview');
   const confBtn = document.getElementById('btnConfirmAddFriendCode');
@@ -2329,8 +2341,8 @@ async function lookupFriendByCode() {
   confBtn.disabled    = true;
   confBtn._foundProfile = null;
 
-  if (id.length !== 8) {
-    errEl.textContent   = 'Il codice deve essere di 8 caratteri.';
+  if (id.length < 3) {
+    errEl.textContent   = 'Inserisci il codice del tuo amico (es. mario1234).';
     errEl.style.display = '';
     return;
   }
@@ -2652,8 +2664,8 @@ function handleOnboardingGuest() {
 
 async function handleSharedGroupUrl(groupStr) {
   const ids = groupStr.split(',')
-    .map(i => i.trim().toUpperCase())
-    .filter(i => /^[A-Z0-9]{8}$/.test(i));
+    .map(i => i.trim().toLowerCase())
+    .filter(i => /^[a-z0-9_-]{3,40}$/.test(i));
 
   if (!ids.length) return;
 
