@@ -13,12 +13,17 @@ CACHE_TTL = 300  # 5 minutes
 
 _cache = {}
 
+try:
+    import zoneinfo
+    TZ_ROME = zoneinfo.ZoneInfo("Europe/Rome")
+except Exception:
+    TZ_ROME = timezone(timedelta(hours=1))
+
 def get_italy_now():
-    # Italy timezone: UTC+2 in Daylight Saving, UTC+1 in Standard
-    # Compute rough timezone or UTC+2 for October
-    # Use timezone with offset based on current time
-    tz_it = timezone(timedelta(hours=2))
-    return datetime.now(tz_it)
+    try:
+        return datetime.now(TZ_ROME)
+    except Exception:
+        return datetime.now(timezone(timedelta(hours=1)))
 
 def fetch_json(url, timeout=12):
     cached = _cache.get(url)
@@ -293,6 +298,9 @@ class handler(BaseHTTPRequestHandler):
             if not date_arg:
                 now_it = get_italy_now()
                 date_arg = now_it.strftime('%d-%m-%Y')
+            elif re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_arg):
+                y, m, d = date_arg.split('-')
+                date_arg = f"{d}-{m}-{y}"
             elif not re.fullmatch(r'\d{2}-\d{2}-\d{4}', date_arg):
                 return self.send_json(400, {"error": "Parametro 'date' non valido (atteso GG-MM-AAAA)"})
 

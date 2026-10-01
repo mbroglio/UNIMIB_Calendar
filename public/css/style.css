@@ -130,6 +130,31 @@ body {
   background: rgba(255, 255, 255, 0.15);
 }
 
+@media (max-width: 400px) {
+  .app-header {
+    padding-left: calc(10px + env(safe-area-inset-left, 0px));
+    padding-right: calc(10px + env(safe-area-inset-right, 0px));
+  }
+  .header-actions {
+    gap: 4px;
+  }
+  .btn-icon {
+    width: 35px;
+    height: 35px;
+    min-width: 35px;
+    min-height: 35px;
+    font-size: 1rem;
+    border-radius: 8px;
+  }
+  .app-title h1 {
+    font-size: 0.95rem;
+  }
+  .app-logo {
+    width: 30px;
+    height: 30px;
+  }
+}
+
 /* Shared Timetable Preview Banner */
 .preview-banner {
   display: none;

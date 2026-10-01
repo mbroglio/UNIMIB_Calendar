@@ -28,6 +28,7 @@ import time
 from http.server import BaseHTTPRequestHandler
 import urllib.request
 import urllib.parse
+import unicodedata
 
 def _get_redis_creds():
     url = (
@@ -85,7 +86,9 @@ def redis_del(key: str):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _clean_nickname(n: str) -> str:
-    return re.sub(r'[^A-Za-z0-9_-]', '', n.strip()).lower()
+    nfkd = unicodedata.normalize('NFKD', n.strip())
+    ascii_str = ''.join(c for c in nfkd if not unicodedata.combining(c))
+    return re.sub(r'[^A-Za-z0-9_-]', '', ascii_str).lower()
 
 
 def _gen_share_code() -> str:
@@ -106,7 +109,7 @@ def _valid_nickname(n) -> bool:
 
 
 def _valid_pin(p) -> bool:
-    return isinstance(p, str) and p.isdigit() and 4 <= len(p) <= 8
+    return isinstance(p, str) and p.isascii() and p.isdigit() and 4 <= len(p) <= 8
 
 
 # ── HTTP Handler ───────────────────────────────────────────────────────────────

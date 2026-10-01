@@ -28,9 +28,17 @@ MONTHS_IT = {
     9: 'Settembre', 10: 'Ottobre', 11: 'Novembre', 12: 'Dicembre'
 }
 
+try:
+    import zoneinfo
+    TZ_ROME = zoneinfo.ZoneInfo("Europe/Rome")
+except Exception:
+    TZ_ROME = timezone(timedelta(hours=1))
+
 def get_italy_now():
-    tz_it = timezone(timedelta(hours=2))
-    return datetime.now(tz_it)
+    try:
+        return datetime.now(TZ_ROME)
+    except Exception:
+        return datetime.now(timezone(timedelta(hours=1)))
 
 def fetch_json(url, timeout=15):
     cached = _cache.get(url)
@@ -47,8 +55,11 @@ def parse_exam_event(ev):
     desc = ev.get('description', '')
     name = ev.get('name', '').strip()
     
-    parts = desc.split('//') if desc else ['']
+    parts = re.split(r'\s*//\s*|/(?=[^/\[]*\[[A-Za-z0-9_-]+\])', desc) if desc else ['']
     courses = []
+    yr_fallback_m = re.search(r'(\d+)\s*anno', desc or '', re.IGNORECASE)
+    yr_fallback = yr_fallback_m.group(1) if yr_fallback_m else ''
+
     for p in parts:
         code_m = re.search(r'\[([A-Za-z0-9_-]+)\]', p)
         yr_m = re.search(r'(\d+)\s*anno', p, re.IGNORECASE)
@@ -56,7 +67,7 @@ def parse_exam_event(ev):
         curr_m = re.search(r'(?:Curriculum|,)\s*([^/\-]+)$', p.strip(), re.IGNORECASE)
         
         c_code = code_m.group(1).upper() if code_m else ''
-        c_year = yr_m.group(1) if yr_m else ''
+        c_year = yr_m.group(1) if yr_m else (yr_fallback if len(parts) == 1 else '')
         c_title = title_m.group(1).strip() if title_m else ''
         c_curr = curr_m.group(1).strip() if curr_m else ''
         if c_code or c_title:
@@ -66,6 +77,8 @@ def parse_exam_event(ev):
                 'title': c_title,
                 'curriculum': c_curr
             })
+        elif yr_m and courses and not courses[-1]['year']:
+            courses[-1]['year'] = yr_m.group(1)
             
     appello_m = re.search(r'Numero appello:\s*(\d+)', desc)
     appello_num = appello_m.group(1) if appello_m else ''
@@ -205,9 +218,16 @@ class handler(BaseHTTPRequestHandler):
             corsi = [c.strip() for c in corsi_arg.split(',') if c.strip()] if corsi_arg else []
             anni = [a.strip() for a in anni_arg.split(',') if a.strip()] if anni_arg else []
 
-            if datefrom_arg and not re.fullmatch(r'\d{2}-\d{2}-\d{4}', datefrom_arg):
+            if datefrom_arg and re.fullmatch(r'\d{4}-\d{2}-\d{2}', datefrom_arg):
+                y, m, d = datefrom_arg.split('-')
+                datefrom_arg = f"{d}-{m}-{y}"
+            elif datefrom_arg and not re.fullmatch(r'\d{2}-\d{2}-\d{4}', datefrom_arg):
                 return self.send_json(400, {"error": "Parametro 'datefrom' non valido (atteso GG-MM-AAAA)"})
-            if dateto_arg and not re.fullmatch(r'\d{2}-\d{2}-\d{4}', dateto_arg):
+
+            if dateto_arg and re.fullmatch(r'\d{4}-\d{2}-\d{2}', dateto_arg):
+                y, m, d = dateto_arg.split('-')
+                dateto_arg = f"{d}-{m}-{y}"
+            elif dateto_arg and not re.fullmatch(r'\d{2}-\d{2}-\d{4}', dateto_arg):
                 return self.send_json(400, {"error": "Parametro 'dateto' non valido (atteso GG-MM-AAAA)"})
 
             payload = get_exams(

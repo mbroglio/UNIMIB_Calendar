@@ -12,6 +12,12 @@ def get_monday(dt=None):
         dt = datetime.now()
     return dt - timedelta(days=dt.weekday())
 
+def _safe_ts(c):
+    try:
+        return int(c.get("timestamp") or 0)
+    except (ValueError, TypeError):
+        return 0
+
 def split_curricula(percorso):
     # Lessons shared by several years of study list each curriculum separated by an <hr> tag
     parts = re.split(r'<hr[^>]*>', percorso or '')
@@ -52,7 +58,9 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             raw_data = fetch_unimib_grid(anno, corso, anni_studio, date_arg)
-            celle = sorted(raw_data.get("celle", []), key=lambda c: (c.get("timestamp") or 0))
+            if not isinstance(raw_data, dict):
+                return self.send_json(502, {"error": "Risposta non valida dal server UNIMIB"})
+            celle = sorted(raw_data.get("celle", []), key=_safe_ts)
             giorni = raw_data.get("giorni", [])
 
             events = []

@@ -12,21 +12,22 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 ## ✨ Features
 
 ### 1. 📅 Lecture Timetable (Orario Lezioni)
-- **🎓 Any Degree Programme**: Choose academic year, didactic area, degree course, and study years (e.g. "1 - Percorso comune"). Choices are fetched live from UNIMIB's official EasyCourse system (`combo.php`), automatically supporting new curricula.
-- **⭐ My Courses Filter (I Miei Corsi)**: Select the specific teachings you follow to get distinct color badges and filter the view to display only your active courses.
-- **👆 Mobile Gestures & Daily View**: Swipe or toggle between full weekly overview or day-by-day timetable.
+- **🎓 Any Degree Programme**: Choose academic year, didactic area, degree course, and study years (e.g. "1 - Percorso comune"). Choices are fetched live from UNIMIB's official EasyCourse system (`combo.php`), automatically supporting new curricula and degree changes.
+- **⭐ My Courses Filter (I Miei Corsi)**: Select the specific teachings you attend to get distinct color badges and filter the view to display only your active courses.
+- **👆 Mobile Gestures & Daily View**: Swipe or toggle between full weekly overview or day-by-day timetable with automatic current day highlighting.
 - **🔍 Real-Time Search**: Instant live filtering by subject name, professor, or classroom.
-- **⚠️ Cancellation Notices**: Automatically highlights canceled lectures or last-minute changes in red.
+- **⚠️ Cancellation Notices**: Automatically highlights canceled lectures or last-minute room changes in red.
 - **🔗 Share Link & QR Code**: Generate a link or QR code containing your course configuration for instant preview and one-tap import.
 
 ### 2. 🏛️ Classroom Occupancy (Occupazione Aule)
-- **🏢 All Campus Buildings**: Real-time room status for all UNIMIB buildings (U01 through U28).
-- **🟢 Status at a Glance**: Instant visual badges indicating whether a room is **Libera** (Free) or **Occupata** (Occupied), including how long it remains free or occupied.
-- **⏰ Time Slots & Date Picker**: Check occupancy right now or inspect specific time blocks (09:00, 11:00, 13:00, 14:30, 16:30) for any date.
-- **📋 Full Daily Schedule**: Tap any classroom to view the complete chronological list of lectures held in that room for the selected day.
+- **🏢 All Campus Buildings**: Real-time room status for all 26+ UNIMIB buildings (U01 through U28).
+- **🟢 Status at a Glance**: Instant visual badges indicating whether a room is **Libera** (Free) or **Occupata** (Occupied).
+- **⏳ Smart Time Windows**: Computes exact availability (*"Libera fino alle 14:30"* or *"Occupata fino alle 16:30"*), automatically chaining consecutive contiguous lectures.
+- **⏰ Time Slots & Italian Date Picker**: Check occupancy right now or inspect specific time blocks (09:00, 11:00, 13:00, 14:30, 16:30) for any date in Italian format (`GG/MM/AAAA`).
+- **📋 Full Daily Schedule**: Tap any classroom card to open a modal displaying the complete chronological list of lectures and bookings held in that room for the selected day.
 
 ### 3. 📝 Exam Calendar (Calendario Esami)
-- **🎓 Monitored Courses**: Automatically imports exam dates for your degree and allows adding extra courses from any didactic area.
+- **🎓 Monitored Courses**: Automatically imports exam dates for your degree and allows adding extra courses from any didactic area across the university.
 - **⭐ Personalized Exam Filter**: Switch between **"📚 Tutti gli Appelli"** (all exams for the degree) and **"⭐ I Miei Corsi"** (only exams matching the teachings you actually attend).
 - **🗓️ Session Filters**: Quick presets for Winter (*Invernale*), Summer (*Estiva*), Autumn (*Autunnale*), or Custom Date Range.
 - **📅 Add to Calendar (.ics)**: Download an `.ics` file for any exam appeal to import it directly into Apple Calendar, Google Calendar, or Outlook.
@@ -38,10 +39,40 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 - **☁️ Serverless Storage**: Backed by **Upstash Redis REST API**, salted with SHA-256 for secure PIN verification.
 
 ### 5. 👥 Friends Shared Calendar (Calendario Amici)
-- **🔒 Privacy First (Zero Leaked Credentials)**: Your PIN remains private for your own devices. The system generates a distinct, anonymous 6-character **Codice Calendario Univoco** (e.g. `K9X2P4`) used exclusively for sharing with friends.
+- **🔒 Privacy First (Zero Leaked Credentials)**: Your personal PIN remains strictly private and is only used to log in on your own devices. The system generates an independent, unique 6-character **Codice Calendario Univoco** (e.g. `K9X2P4`) using unambiguous characters (no `0`, `O`, `1`, `I`).
 - **🔗 Instant Link or Code Sharing**: Add friends by entering their 6-character calendar code, or send them a direct link (e.g. `/?friend=K9X2P4`) which automatically adds them to their calendar with a single tap.
 - **🤝 Compare Timetables**: See your schedule and your friends' schedules combined on a single weekly calendar with distinct color-coded badges to easily spot common free hours and overlapping classes.
 - **👥 One-Tap Group Links**: Click **🔗 Condividi Gruppo** to generate a link (e.g. `/?group=K9X2P4,W3M7R2`) so an entire study group can load all friends at once.
+
+### 6. 📱 iOS & Mobile Optimizations
+- **Safe Area Inset Support**: Fully accounts for iPhone notch, Dynamic Island, and home indicator bars (`env(safe-area-inset-top)` and `env(safe-area-inset-bottom)`).
+- **Compact Header Breakpoints**: Responsive adjustments for narrower screens (e.g. iPhone SE / mini) to keep all navigation buttons accessible.
+- **PWA Offline Caching**: Service Worker v11 caches core application assets for fast load times and offline readiness.
+
+---
+
+## 🔒 Privacy & Architecture Model
+
+```mermaid
+flowchart TD
+    subgraph PrivateAccount ["Private Account (User Only)"]
+        A["Soprannome + PIN"] -->|Salted SHA-256| B["Redis: account:clean_nick"]
+        B --> C["Personal Config & Exam Courses"]
+    end
+
+    subgraph PublicShare ["Public Friend Sharing (Read-Only)"]
+        B -->|Generates| D["6-Char Share Code (e.g. K9X2P4)"]
+        D --> E["Redis: share:share_code"]
+        E --> F["Nickname + Courses (NO PIN, NO Credentials)"]
+    end
+
+    subgraph FriendAccess ["Friends Access"]
+        F --> G["Direct Link: /?friend=K9X2P4"]
+        F --> H["Enter Code in App: K9X2P4"]
+        G --> I["Shared Weekly Grid (Multi-Student)"]
+        H --> I
+    end
+```
 
 ---
 
@@ -49,7 +80,7 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 
 - **Frontend**: Vanilla ES6+ JavaScript, Responsive CSS3 (Glassmorphism, Mobile-First, iOS Safe Area support).
 - **PWA**: Service Worker cache strategy (`sw.js`) and Web App Manifest (`manifest.json`) for native-like installation on iOS & Android.
-- **Backend / Scrapers**: Python serverless functions (standard library `urllib` & `json`, zero external dependencies).
+- **Backend / Scrapers**: Python serverless functions (standard library `urllib`, `json`, `zoneinfo`, zero external dependencies).
 - **Database**: Upstash Redis (Serverless REST API) for profile preferences and friend indices.
 - **Hosting & CI/CD**: Vercel Serverless Functions.
 
@@ -71,7 +102,7 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 │   │   └── style.css       # Responsive dark-theme & glassmorphism styles
 │   ├── js/
 │   │   ├── app.js          # Main SPA application logic & state management
-│   │   └── sw.js           # PWA Service Worker (offline cache)
+│   │   └── sw.js           # PWA Service Worker (offline cache v11)
 │   ├── icons/              # App icons for iOS / Android home screens
 │   ├── index.html          # Single Page Application HTML template
 │   └── manifest.json       # Web App Manifest
@@ -87,8 +118,8 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
 | `GET` | `/api/options` | Returns academic years, didactic areas, degree courses, and study years |
-| `GET` | `/api/calendar` | Returns lessons for selected degree course and study years for a given week |
-| `GET` | `/api/rooms` | Returns real-time room occupancy and daily schedule for a campus building |
+| `GET` | `/api/calendar` | Returns lessons for selected degree course and study years for a given week (`date=DD-MM-YYYY`) |
+| `GET` | `/api/rooms` | Returns real-time room occupancy and daily schedule for a campus building (`sede=U01`, `date=DD-MM-YYYY` or `YYYY-MM-DD`, `time=HH:MM`) |
 | `GET` | `/api/exams` | Returns upcoming exam appeals filtered by degree courses, years, and date range |
 | `POST` | `/api/profile` | Creates a new account (`{ nickname, pin, config, exam_courses }`) and returns generated `share_code` |
 | `PUT` | `/api/profile` | Authenticates / updates account (`{ nickname, pin, config?, exam_courses? }`) and syncs cloud schedule |
@@ -97,9 +128,26 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 
 ---
 
+## 🧪 Edge Cases & Verification
+
+The backend includes a comprehensive edge case test suite covering:
+1. **Accents and Diacritics**: Proper Unicode NFKD normalization (`Nicolò` → `nicolo`, `Élena` → `elena`) ensuring account identifiers are consistent while preserving displayed nicknames.
+2. **PIN Validation**: Enforces strictly 4-8 ASCII digits, safely handling leading zeros (`0123`), rejecting non-ASCII digits (`①②③④`), and preventing string/number type errors.
+3. **Date Formats**: Accepts both Italian `DD-MM-YYYY` and ISO `YYYY-MM-DD` interchangeably, correctly normalising weekend dates (Saturday/Sunday) to the active academic week's Monday.
+4. **Time & Contiguous Bookings**: Accurate Italy timezone calculation (`Europe/Rome` with DST handling) and automatic chaining of back-to-back lectures within 15 minutes.
+5. **Exam Multi-Curricula Parsing**: Regex-based splitting supporting both `//` and `/` delimiters across multi-degree exam appeals.
+6. **Safe Sorting**: Robust timestamp extraction preventing mixed-type comparison errors (`TypeError: '<' not supported between instances of 'int' and 'str'`).
+
+Run the test suite locally:
+```bash
+python3 -m unittest scratch/test_edge_cases.py
+```
+
+---
+
 ## 🚀 Environment Variables (Vercel)
 
-To enable the cloud profile and shared friends calendar, configure the following environment variables in your Vercel project (**Settings** → **Environment Variables**):
+To enable cloud profiles and shared friend calendars, configure the following environment variables in your Vercel project (**Settings** → **Environment Variables**):
 
 | Variable | Description |
 | :--- | :--- |

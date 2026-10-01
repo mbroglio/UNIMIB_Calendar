@@ -86,10 +86,17 @@ def _redis_get(key: str):
 # ── UNIMIB grid fetch (same logic as calendar.py) ─────────────────────────────
 
 def _get_monday(date_str: str) -> str:
-    """Given DD-MM-YYYY, return the Monday of that week in DD-MM-YYYY."""
-    try:
-        dt = datetime.strptime(date_str, "%d-%m-%Y")
-    except ValueError:
+    """Given DD-MM-YYYY or YYYY-MM-DD, return the Monday of that week in DD-MM-YYYY."""
+    dt = None
+    if date_str:
+        clean = date_str.strip().replace('/', '-')
+        for fmt in ("%d-%m-%Y", "%Y-%m-%d"):
+            try:
+                dt = datetime.strptime(clean, fmt)
+                break
+            except ValueError:
+                pass
+    if not dt:
         dt = datetime.now()
     monday = dt - timedelta(days=dt.weekday())
     return monday.strftime("%d-%m-%Y")
@@ -124,7 +131,16 @@ def _fetch_events(cfg: dict, date_str: str) -> list:
     except Exception:
         return []
 
-    celle  = sorted(raw_data.get("celle", []), key=lambda c: (c.get("timestamp") or 0))
+    if not isinstance(raw_data, dict):
+        return []
+
+    def _safe_ts(c):
+        try:
+            return int(c.get("timestamp") or 0)
+        except (ValueError, TypeError):
+            return 0
+
+    celle  = sorted(raw_data.get("celle", []), key=_safe_ts)
     events = []
     for c in celle:
         events.append({
