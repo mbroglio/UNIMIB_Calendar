@@ -51,46 +51,174 @@
     </div>
   </div>
 
-  <!-- Filter & Mode Selection -->
-  <div class="filter-container">
-    <div class="toggle-group">
-      <button id="btnFilterTarget" class="toggle-btn active">⭐ I Miei Corsi</button>
-      <button id="btnFilterAll" class="toggle-btn">📚 Tutti i Corsi</button>
+  <!-- Main Views Container -->
+  <!-- 1. Timetable View -->
+  <section id="viewTimetable" class="app-view">
+    <!-- Filter & Mode Selection -->
+    <div class="filter-container">
+      <div class="toggle-group">
+        <button id="btnFilterTarget" class="toggle-btn active">⭐ I Miei Corsi</button>
+        <button id="btnFilterAll" class="toggle-btn">📚 Tutti i Corsi</button>
+      </div>
+
+      <!-- Live Search Bar -->
+      <div style="position: relative;">
+        <input type="text" id="searchInput" placeholder="🔍 Cerca per corso, docente o aula..." 
+               style="width: 100%; padding: 10px 14px; border-radius: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #FFF; font-size: 0.85rem; outline: none;">
+      </div>
     </div>
 
-    <!-- Live Search Bar -->
-    <div style="position: relative;">
-      <input type="text" id="searchInput" placeholder="🔍 Cerca per corso, docente o aula..." 
-             style="width: 100%; padding: 10px 14px; border-radius: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #FFF; font-size: 0.85rem; outline: none;">
+    <!-- Week Navigation Bar -->
+    <div class="week-navigator">
+      <button id="btnPrevWeek" class="week-nav-btn">◀ Prev</button>
+      <div class="week-label">
+        <div id="weekLabelText" class="date-range">Caricamento...</div>
+        <span id="btnToday" class="badge-status" style="cursor: pointer;">Oggi / Questa Settimana</span>
+      </div>
+      <button id="btnNextWeek" class="week-nav-btn">Next ▶</button>
     </div>
-  </div>
 
-  <!-- Week Navigation Bar -->
-  <div class="week-navigator">
-    <button id="btnPrevWeek" class="week-nav-btn">◀ Prev</button>
-    <div class="week-label">
-      <div id="weekLabelText" class="date-range">Caricamento...</div>
-      <span id="btnToday" class="badge-status" style="cursor: pointer;">Oggi / Questa Settimana</span>
+    <!-- Day Tabs (Horizontal Scroll on Mobile) -->
+    <div id="daysTabBar" class="days-tab-bar">
+      <!-- Rendered dynamically by app.js -->
     </div>
-    <button id="btnNextWeek" class="week-nav-btn">Next ▶</button>
-  </div>
 
-  <!-- Day Tabs (Horizontal Scroll on Mobile) -->
-  <div id="daysTabBar" class="days-tab-bar">
-    <!-- Rendered dynamically by app.js -->
-  </div>
+    <!-- Main Timetable Content -->
+    <main>
+      <div id="spinnerContainer" class="spinner-container">
+        <div class="spinner"></div>
+        <p style="font-size:0.85rem; color:var(--text-secondary);">Scraping calendario UNIMIB in corso...</p>
+      </div>
 
-  <!-- Main Content Area -->
-  <main>
-    <div id="spinnerContainer" class="spinner-container">
+      <div id="eventsContainer" class="events-container" style="display: none;">
+        <!-- Events rendered dynamically by app.js -->
+      </div>
+    </main>
+  </section>
+
+  <!-- 2. Classroom Occupancy View -->
+  <section id="viewRooms" class="app-view hidden">
+    <!-- Building & Date Selection Card -->
+    <div class="control-card">
+      <div class="rooms-select-row">
+        <div class="rooms-select-group">
+          <label for="roomsBuildingSelect">🏛️ Edificio / Sede</label>
+          <select id="roomsBuildingSelect">
+            <option value="">Caricamento edifici...</option>
+          </select>
+        </div>
+
+        <div class="rooms-select-group">
+          <label for="roomsDateInput">📅 Data</label>
+          <div class="rooms-date-nav">
+            <button id="btnRoomsPrevDay" class="btn-icon" style="width:36px;height:36px;" title="Giorno precedente">◀</button>
+            <input type="date" id="roomsDateInput">
+            <button id="btnRoomsNextDay" class="btn-icon" style="width:36px;height:36px;" title="Giorno successivo">▶</button>
+            <button id="btnRoomsToday" class="btn-secondary" style="width:auto;padding:8px 12px;font-size:0.8rem;font-weight:600;">Oggi</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Room Search -->
+      <div style="position: relative;">
+        <input type="text" id="roomsSearchInput" placeholder="🔍 Cerca aula (es. 01, Lab, Magna)..." 
+               style="width: 100%; padding: 10px 14px; border-radius: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #FFF; font-size: 0.85rem; outline: none;">
+      </div>
+    </div>
+
+    <!-- Rooms Summary & Filter Status -->
+    <div id="roomsSummaryBanner" class="rooms-summary-banner" style="display: none;">
+      <div id="roomsSummaryText" style="color:var(--text-primary); font-weight:600;">Caricamento stato...</div>
+      <div class="stats-badges">
+        <span id="badgeRoomsTotal" class="badge-stat total">0 aule</span>
+        <span id="badgeRoomsFree" class="badge-stat free">🟢 0 libere</span>
+        <span id="badgeRoomsOccupied" class="badge-stat occupied">🔴 0 occupate</span>
+        <button id="btnRefreshRooms" class="btn-secondary" style="width:auto; padding:4px 10px; font-size:0.75rem;">🔄 Ricarica</button>
+      </div>
+    </div>
+
+    <!-- Rooms Filter Pills -->
+    <div id="roomsFilterBar" class="rooms-filter-pills" style="display: none;">
+      <button class="filter-pill active" data-filter="all">Tutte le aule</button>
+      <button class="filter-pill" data-filter="free">🟢 Solo libere</button>
+      <button class="filter-pill" data-filter="occupied">🔴 Solo occupate</button>
+    </div>
+
+    <!-- Rooms Spinner -->
+    <div id="roomsSpinnerContainer" class="spinner-container" style="display: none;">
       <div class="spinner"></div>
-      <p style="font-size:0.85rem; color:var(--text-secondary);">Scraping calendario UNIMIB in corso...</p>
+      <p style="font-size:0.85rem; color:var(--text-secondary);">Verifica occupazione aule in corso...</p>
     </div>
 
-    <div id="eventsContainer" class="events-container" style="display: none;">
-      <!-- Events rendered dynamically by app.js -->
+    <!-- Rooms Grid -->
+    <div id="roomsGrid" class="rooms-grid">
+      <!-- Rendered dynamically by app.js -->
     </div>
-  </main>
+  </section>
+
+  <!-- 3. Exam Calendar View -->
+  <section id="viewExams" class="app-view hidden">
+    <div class="control-card">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <label style="font-size:0.75rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase;">🎓 Corsi monitorati</label>
+        <button id="btnOpenAddExamCourse" class="btn-icon" style="width:28px;height:28px;font-size:0.85rem;" title="Aggiungi corso">+</button>
+      </div>
+
+      <!-- Active Course Chips -->
+      <div id="examCoursesChips" class="exam-courses-bar">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <!-- Session Quick Pills -->
+      <div>
+        <label style="font-size:0.75rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; margin-bottom:6px; display:block;">🗓️ Sessione d'esame</label>
+        <div id="examSessionPills" class="rooms-filter-pills" style="margin:0 0 8px;">
+          <button class="filter-pill active" data-session="upcoming">Tutti i prossimi</button>
+          <button class="filter-pill" data-session="winter">❄️ Invernale (Gen-Feb)</button>
+          <button class="filter-pill" data-session="summer">☀️ Estiva (Giu-Lug)</button>
+          <button class="filter-pill" data-session="autumn">🍂 Autunnale (Set-Ott)</button>
+          <button class="filter-pill" data-session="custom">📅 Personalizzato</button>
+        </div>
+        <div id="examCustomDateRange" style="display:none; align-items:center; gap:8px; margin-top:8px;">
+          <input type="date" id="examDateFrom" style="flex:1; padding:8px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:#FFF; color-scheme:dark; font-size:0.8rem;">
+          <span style="color:var(--text-muted); font-size:0.8rem;">al</span>
+          <input type="date" id="examDateTo" style="flex:1; padding:8px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:#FFF; color-scheme:dark; font-size:0.8rem;">
+          <button id="btnApplyExamDates" class="btn-primary" style="width:auto; padding:8px 12px; font-size:0.8rem;">Filtra</button>
+        </div>
+      </div>
+
+      <!-- Search & Year Filter -->
+      <div style="display: flex; gap: 8px;">
+        <div style="flex: 1; position: relative;">
+          <input type="text" id="examsSearchInput" placeholder="🔍 Cerca esame o docente..." 
+                 style="width: 100%; padding: 10px 14px; border-radius: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #FFF; font-size: 0.85rem; outline: none;">
+        </div>
+        <select id="examYearFilter" style="width:auto; padding:10px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:#FFF; font-size:0.85rem; outline:none;">
+          <option value="">Tutti gli anni</option>
+          <option value="1">1° Anno</option>
+          <option value="2">2° Anno</option>
+          <option value="3">3° Anno</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Exams Summary -->
+    <div id="examsSummaryBanner" class="rooms-summary-banner" style="display: none;">
+      <div id="examsCountText" style="color:var(--text-primary); font-weight:600;">0 appelli trovati</div>
+      <button id="btnRefreshExams" class="btn-secondary" style="width:auto; padding:4px 10px; font-size:0.75rem;">🔄 Ricarica</button>
+    </div>
+
+    <!-- Exams Spinner -->
+    <div id="examsSpinnerContainer" class="spinner-container" style="display: none;">
+      <div class="spinner"></div>
+      <p style="font-size:0.85rem; color:var(--text-secondary);">Ricerca appelli d'esame in corso...</p>
+    </div>
+
+    <!-- Exams List Container -->
+    <div id="examsContainer">
+      <!-- Rendered dynamically -->
+    </div>
+  </section>
 
   <!-- App Footer / Credits -->
   <footer class="app-footer">
@@ -121,6 +249,64 @@
         <button id="btnCopyShare" class="btn-primary">📋 Copia link</button>
         <button id="btnNativeShare" class="btn-secondary">📤 Condividi…</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Classroom Day Schedule Modal -->
+  <div id="roomScheduleModal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 480px; text-align: left;">
+      <div class="modal-header">
+        <div>
+          <h3 id="modalRoomTitle" style="font-size:1.15rem; color:#FFF; margin-bottom:2px;">Aula</h3>
+          <p id="modalRoomSubtitle" style="font-size:0.8rem; color:var(--text-secondary);">Edificio</p>
+        </div>
+        <button id="btnCloseRoomSchedule" class="btn-icon" style="width:32px; height:32px;">✕</button>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.05); padding:8px 12px; border-radius:8px; margin-bottom:12px;">
+        <button id="btnModalPrevDay" class="btn-icon" style="width:30px;height:30px;font-size:0.8rem;">◀</button>
+        <span id="modalDateLabel" style="font-size:0.85rem; font-weight:700; color:var(--accent-cyan);">Oggi</span>
+        <button id="btnModalNextDay" class="btn-icon" style="width:30px;height:30px;font-size:0.8rem;">▶</button>
+      </div>
+
+      <div id="modalRoomEventsList" class="room-timeline" style="max-height: 55vh; overflow-y: auto;">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Exam Course Modal -->
+  <div id="addExamCourseModal" class="modal-overlay">
+    <div class="modal-content setup-content" style="max-width: 440px;">
+      <div class="modal-header">
+        <h3>➕ Aggiungi corso agli esami</h3>
+        <button id="btnCloseAddExamCourse" class="btn-icon" style="width:30px; height:30px;">✕</button>
+      </div>
+      <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:14px;">
+        Seleziona un corso di studio per includere i suoi appelli nel calendario esami:
+      </p>
+
+      <div class="form-field">
+        <label for="addExamCourseArea">Area didattica</label>
+        <select id="addExamCourseArea">
+          <option value="">Caricamento aree...</option>
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label for="addExamCourseSelect">Corso di studio</label>
+        <select id="addExamCourseSelect" disabled>
+          <option value="">Seleziona prima l'area</option>
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label for="addExamCourseCustomCode">Oppure inserisci codice corso (es. E3101Q)</label>
+        <input type="text" id="addExamCourseCustomCode" placeholder="Codice corso..." 
+               style="width: 100%; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85rem; outline: none; text-transform: uppercase;">
+      </div>
+
+      <button id="btnConfirmAddExamCourse" class="btn-primary" style="margin-top:10px;" disabled>Aggiungi al Calendario Esami</button>
     </div>
   </div>
 
@@ -160,6 +346,22 @@
       <button id="btnSaveSetup" class="btn-primary" disabled>Salva</button>
     </div>
   </div>
+
+  <!-- Bottom Navigation Bar -->
+  <nav class="bottom-nav">
+    <button id="tabTimetable" class="nav-tab active">
+      <span class="nav-icon">📅</span>
+      <span class="nav-label">Orario</span>
+    </button>
+    <button id="tabRooms" class="nav-tab">
+      <span class="nav-icon">🏫</span>
+      <span class="nav-label">Aule</span>
+    </button>
+    <button id="tabExams" class="nav-tab">
+      <span class="nav-icon">📝</span>
+      <span class="nav-label">Esami</span>
+    </button>
+  </nav>
 
   <!-- Notification Toast -->
   <div id="toastNotification" class="toast">Messaggio</div>

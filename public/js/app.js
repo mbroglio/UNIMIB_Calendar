@@ -15,7 +15,30 @@ let state = {
   config: null,           // { anno, corso, corsoLabel, anni: [...], anniLabels: [...], favorites: [{code, label}] }
   favoriteColors: {},     // course_code -> color
   preview: false,         // true while viewing a shared config that is not saved
-  requestId: 0
+  requestId: 0,
+  activeTab: 'timetable'  // 'timetable', 'rooms', 'exams'
+};
+
+const EXAM_COURSES_KEY = 'unimib_exam_courses';
+
+let roomsState = {
+  buildings: [],
+  selectedBuilding: localStorage.getItem('unimib_rooms_building') || 'U06',
+  selectedDate: '', // initialized in initApp
+  activeFilter: 'all', // 'all', 'free', 'occupied'
+  searchQuery: '',
+  data: null,
+  modalRoom: null,
+  modalDate: ''
+};
+
+let examsState = {
+  extraCourses: [], // initialized in initApp from localStorage
+  activeSession: 'upcoming', // 'upcoming', 'winter', 'summer', 'autumn', 'custom'
+  yearFilter: '',
+  searchQuery: '',
+  exams: [],
+  isLoading: false
 };
 
 // Options loaded from the UNIMIB dropdown data while the setup modal is open
@@ -30,6 +53,10 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initApp() {
+  roomsState.selectedDate = formatDateIso(new Date());
+  roomsState.modalDate = roomsState.selectedDate;
+  examsState.extraCourses = loadExamCourses();
+
   setupEventListeners();
   registerServiceWorker();
 
@@ -57,6 +84,11 @@ function registerServiceWorker() {
 }
 
 function setupEventListeners() {
+  // Navigation Tabs
+  document.getElementById('tabTimetable').addEventListener('click', () => switchTab('timetable'));
+  document.getElementById('tabRooms').addEventListener('click', () => switchTab('rooms'));
+  document.getElementById('tabExams').addEventListener('click', () => switchTab('exams'));
+
   // Filter Toggle
   document.getElementById('btnFilterTarget').addEventListener('click', () => {
     setFilter('target');
@@ -82,10 +114,16 @@ function setupEventListeners() {
   });
 
   document.getElementById('btnRefresh').addEventListener('click', () => {
-    loadCalendar(state.currentMonday, true);
+    if (state.activeTab === 'timetable') {
+      loadCalendar(state.currentMonday, true);
+    } else if (state.activeTab === 'rooms') {
+      loadRoomsOccupancy(true);
+    } else if (state.activeTab === 'exams') {
+      loadExams(true);
+    }
   });
 
-  // Search Bar
+  // Timetable Search Bar
   const searchInput = document.getElementById('searchInput');
   if (searchInput) {
     searchInput.addEventListener('input', (e) => {
@@ -93,6 +131,101 @@ function setupEventListeners() {
       renderEvents();
     });
   }
+
+  // Rooms Occupancy Controls
+  document.getElementById('roomsBuildingSelect').addEventListener('change', (e) => {
+    roomsState.selectedBuilding = e.target.value;
+    localStorage.setItem('unimib_rooms_building', roomsState.selectedBuilding);
+    loadRoomsOccupancy();
+  });
+
+  document.getElementById('roomsDateInput').addEventListener('change', (e) => {
+    if (e.target.value) {
+      roomsState.selectedDate = e.target.value;
+      loadRoomsOccupancy();
+    }
+  });
+
+  document.getElementById('btnRoomsPrevDay').addEventListener('click', () => changeRoomsDate(-1));
+  document.getElementById('btnRoomsNextDay').addEventListener('click', () => changeRoomsDate(1));
+  document.getElementById('btnRoomsToday').addEventListener('click', setRoomsDateToday);
+  const btnRefreshRooms = document.getElementById('btnRefreshRooms');
+  if (btnRefreshRooms) {
+    btnRefreshRooms.addEventListener('click', () => loadRoomsOccupancy(true));
+  }
+
+  document.getElementById('roomsSearchInput').addEventListener('input', (e) => {
+    roomsState.searchQuery = e.target.value;
+    renderRooms();
+  });
+
+  document.querySelectorAll('#roomsFilterBar .filter-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('#roomsFilterBar .filter-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      roomsState.activeFilter = pill.getAttribute('data-filter') || 'all';
+      renderRooms();
+    });
+  });
+
+  // Room Schedule Modal
+  document.getElementById('btnCloseRoomSchedule').addEventListener('click', () => {
+    document.getElementById('roomScheduleModal').classList.remove('active');
+  });
+  document.getElementById('btnModalPrevDay').addEventListener('click', () => changeModalRoomDay(-1));
+  document.getElementById('btnModalNextDay').addEventListener('click', () => changeModalRoomDay(1));
+
+  // Exam Calendar Controls
+  document.getElementById('btnOpenAddExamCourse').addEventListener('click', openAddExamCourseModal);
+  document.getElementById('btnCloseAddExamCourse').addEventListener('click', closeAddExamCourseModal);
+  document.getElementById('btnConfirmAddExamCourse').addEventListener('click', confirmAddExamCourse);
+
+  document.getElementById('addExamCourseArea').addEventListener('change', onAddExamCourseAreaChange);
+  document.getElementById('addExamCourseSelect').addEventListener('change', onAddExamCourseSelectChange);
+  document.getElementById('addExamCourseCustomCode').addEventListener('input', onAddExamCourseCustomCodeInput);
+
+  document.querySelectorAll('#examSessionPills .filter-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('#examSessionPills .filter-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      const session = pill.getAttribute('data-session');
+      examsState.activeSession = session;
+      const customRange = document.getElementById('examCustomDateRange');
+      if (session === 'custom') {
+        customRange.style.display = 'flex';
+      } else {
+        customRange.style.display = 'none';
+        loadExams();
+      }
+    });
+  });
+
+  document.getElementById('btnApplyExamDates').addEventListener('click', () => {
+    loadExams();
+  });
+
+  document.getElementById('examsSearchInput').addEventListener('input', (e) => {
+    examsState.searchQuery = e.target.value;
+    renderExams();
+  });
+
+  document.getElementById('examYearFilter').addEventListener('change', (e) => {
+    examsState.yearFilter = e.target.value;
+    loadExams();
+  });
+
+  document.getElementById('btnRefreshExams').addEventListener('click', () => {
+    loadExams(true);
+  });
+
+  // Close modals when clicking on background overlay
+  document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        overlay.classList.remove('active');
+      }
+    });
+  });
 
   // Share link
   document.getElementById('btnShare').addEventListener('click', openShare);
@@ -133,6 +266,7 @@ function setupEventListeners() {
   }, { passive: true });
 
   function handleSwipe() {
+    if (state.activeTab !== 'timetable') return;
     const diff = touchEndX - touchStartX;
     if (Math.abs(diff) > 75) {
       if (diff < 0) {
@@ -188,8 +322,11 @@ function applyConfig() {
     state.favoriteColors[f.code] = FAVORITE_COLORS[i % FAVORITE_COLORS.length];
   });
 
-  document.getElementById('headerSubtitle').textContent = `${cfg.corsoLabel} · ${cfg.anniLabels.join(', ')}`;
+  if (state.activeTab === 'timetable') {
+    document.getElementById('headerSubtitle').textContent = `${cfg.corsoLabel} · ${cfg.anniLabels.join(', ')}`;
+  }
   setFilter(cfg.favorites && cfg.favorites.length ? 'target' : 'all');
+  renderExamCourseChips();
 }
 
 // ---------- Share link (?anno=2026&corso=F1801Q&anno2=GGG%7C2&fav=EC523651,EC523669) ----------
@@ -884,3 +1021,656 @@ function formatFormattedDate(d) {
   const year = d.getFullYear();
   return `${day}-${month}-${year}`;
 }
+
+const DAYS_NAMES_IT = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+
+function formatDateIso(d) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function isoToDate(iso) {
+  if (!iso) return new Date();
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function isoToFormatted(iso) {
+  if (!iso) return '';
+  const parts = iso.split('-');
+  if (parts.length !== 3) return iso;
+  return `${parts[2]}-${parts[1]}-${parts[0]}`;
+}
+
+function isoToDisplayDate(iso) {
+  if (!iso) return '';
+  const dt = isoToDate(iso);
+  const dayName = DAYS_NAMES_IT[dt.getDay()];
+  const d = String(dt.getDate()).padStart(2, '0');
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  return `${dayName} ${d}/${m}/${dt.getFullYear()}`;
+}
+
+// ---------- Tab Navigation Switcher ----------
+
+function switchTab(tabId) {
+  state.activeTab = tabId;
+
+  document.querySelectorAll('.bottom-nav .nav-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.id === (tabId === 'timetable' ? 'tabTimetable' : tabId === 'rooms' ? 'tabRooms' : 'tabExams'));
+  });
+
+  document.getElementById('viewTimetable').classList.toggle('hidden', tabId !== 'timetable');
+  document.getElementById('viewRooms').classList.toggle('hidden', tabId !== 'rooms');
+  document.getElementById('viewExams').classList.toggle('hidden', tabId !== 'exams');
+
+  // Scroll to top on switch
+  window.scrollTo({ top: 0, behavior: 'instant' });
+
+  // Update header subtitle
+  if (tabId === 'timetable') {
+    document.getElementById('headerSubtitle').textContent = state.config 
+      ? `${state.config.corsoLabel} · ${state.config.anniLabels.join(', ')}` 
+      : 'Seleziona il tuo corso';
+  } else if (tabId === 'rooms') {
+    document.getElementById('headerSubtitle').textContent = 'Occupazione aule in tempo reale';
+    if (!roomsState.buildings.length) {
+      loadRoomsBuildings();
+    } else if (!roomsState.data) {
+      loadRoomsOccupancy();
+    }
+  } else if (tabId === 'exams') {
+    document.getElementById('headerSubtitle').textContent = 'Calendario appelli d\'esame';
+    initExamsView();
+  }
+}
+
+// ---------- Classroom Occupancy (Occupazione Aule) ----------
+
+async function loadRoomsBuildings() {
+  try {
+    const res = await fetchJson('/api/rooms');
+    roomsState.buildings = res.buildings || [];
+    const select = document.getElementById('roomsBuildingSelect');
+    select.innerHTML = roomsState.buildings.map(b => 
+      `<option value="${escapeHtml(b.value)}" ${b.value === roomsState.selectedBuilding ? 'selected' : ''}>${escapeHtml(b.label)}</option>`
+    ).join('');
+
+    if (!roomsState.buildings.some(b => b.value === roomsState.selectedBuilding) && roomsState.buildings.length > 0) {
+      roomsState.selectedBuilding = roomsState.buildings[0].value;
+      select.value = roomsState.selectedBuilding;
+    }
+
+    document.getElementById('roomsDateInput').value = roomsState.selectedDate;
+    loadRoomsOccupancy();
+  } catch (err) {
+    console.error('Error loading buildings:', err);
+    showToast('Errore nel caricamento degli edifici');
+  }
+}
+
+async function loadRoomsOccupancy(forceRefresh = false) {
+  if (!roomsState.selectedBuilding) return;
+
+  const spinner = document.getElementById('roomsSpinnerContainer');
+  const grid = document.getElementById('roomsGrid');
+  spinner.style.display = 'block';
+  grid.style.display = 'none';
+
+  const apiDate = isoToFormatted(roomsState.selectedDate);
+  try {
+    const data = await fetchJson(`/api/rooms?sede=${encodeURIComponent(roomsState.selectedBuilding)}&date=${encodeURIComponent(apiDate)}`);
+    roomsState.data = data;
+    spinner.style.display = 'none';
+    grid.style.display = 'grid';
+
+    document.getElementById('roomsSummaryBanner').style.display = 'flex';
+    document.getElementById('roomsFilterBar').style.display = 'flex';
+
+    document.getElementById('badgeRoomsTotal').textContent = `${data.total_rooms} aule`;
+    document.getElementById('badgeRoomsFree').textContent = `🟢 ${data.free_rooms} libere`;
+    document.getElementById('badgeRoomsOccupied').textContent = `🔴 ${data.occupied_rooms} occupate`;
+
+    const timeText = data.check_time ? ` · Ore ${data.check_time}` : '';
+    document.getElementById('roomsSummaryText').textContent = data.is_today 
+      ? `Stato in tempo reale${timeText}`
+      : `Occupazione per il ${data.date}`;
+
+    renderRooms();
+    if (forceRefresh) showToast('Occupazione aule aggiornata!');
+  } catch (err) {
+    spinner.style.display = 'none';
+    grid.style.display = 'grid';
+    console.error('Error loading rooms occupancy:', err);
+    showToast('Impossibile verificare l\'occupazione delle aule');
+  }
+}
+
+function renderRooms() {
+  const grid = document.getElementById('roomsGrid');
+  if (!roomsState.data || !roomsState.data.rooms) {
+    grid.innerHTML = '';
+    return;
+  }
+
+  const q = roomsState.searchQuery.toLowerCase().trim();
+  const filtered = roomsState.data.rooms.filter(r => {
+    if (roomsState.activeFilter === 'free' && !r.is_free) return false;
+    if (roomsState.activeFilter === 'occupied' && r.is_free) return false;
+    if (q) {
+      const matchName = r.name.toLowerCase().includes(q);
+      const matchCode = r.code.toLowerCase().includes(q);
+      const matchEvent = r.events.some(e => e.name.toLowerCase().includes(q));
+      if (!matchName && !matchCode && !matchEvent) return false;
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state" style="grid-column: 1 / -1;">
+        <div class="empty-icon">🔍</div>
+        <h3>Nessuna aula trovata</h3>
+        <p>Nessun'aula corrisponde ai filtri selezionati.</p>
+      </div>
+    `;
+    return;
+  }
+
+  grid.innerHTML = filtered.map(r => `
+    <div class="room-card ${r.is_free ? 'free' : 'occupied'}" data-code="${escapeHtml(r.code)}">
+      <div class="room-card-top">
+        <div>
+          <div class="room-card-title">${escapeHtml(r.name)}</div>
+          <div class="room-card-capacity">👥 ${r.capacity > 0 ? r.capacity + ' posti' : 'Capienza n/d'} · ${escapeHtml(r.code)}</div>
+        </div>
+        <div class="status-badge ${r.is_free ? 'free' : 'occupied'}">
+          <span class="status-indicator-dot"></span>
+          ${r.is_free ? 'LIBERA' : 'OCCUPATA'}
+        </div>
+      </div>
+      <div class="room-card-body">
+        ${r.is_free 
+          ? `<strong>Libera adesso</strong> · ${r.free_until === 'fine giornata' ? 'Tutto il giorno' : 'Fino alle ' + escapeHtml(r.free_until)}` 
+          : `<strong>Occupata fino alle ${escapeHtml(r.current_event ? r.current_event.to : '')}</strong><br><span style="color:var(--text-secondary);">${escapeHtml(r.current_event ? r.current_event.name : '')}</span>`
+        }
+      </div>
+      <div class="room-card-footer">
+        <span>${r.events_count} ${r.events_count === 1 ? 'lezione/evento oggi' : 'lezioni/eventi oggi'}</span>
+        <span>Tutte le lezioni ➔</span>
+      </div>
+    </div>
+  `).join('');
+
+  grid.querySelectorAll('.room-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const code = card.getAttribute('data-code');
+      const room = roomsState.data.rooms.find(r => r.code === code);
+      if (room) openRoomSchedule(room);
+    });
+  });
+}
+
+function setRoomsDateToday() {
+  roomsState.selectedDate = formatDateIso(new Date());
+  document.getElementById('roomsDateInput').value = roomsState.selectedDate;
+  loadRoomsOccupancy();
+}
+
+function changeRoomsDate(deltaDays) {
+  const dt = isoToDate(roomsState.selectedDate);
+  dt.setDate(dt.getDate() + deltaDays);
+  roomsState.selectedDate = formatDateIso(dt);
+  document.getElementById('roomsDateInput').value = roomsState.selectedDate;
+  loadRoomsOccupancy();
+}
+
+function openRoomSchedule(room) {
+  roomsState.modalRoom = room;
+  roomsState.modalDate = roomsState.selectedDate;
+
+  document.getElementById('modalRoomTitle').textContent = room.name;
+  document.getElementById('modalRoomSubtitle').textContent = `${room.capacity > 0 ? room.capacity + ' posti · ' : ''}Edificio ${roomsState.selectedBuilding}`;
+  document.getElementById('modalDateLabel').textContent = isoToDisplayDate(roomsState.modalDate);
+
+  renderModalRoomEvents(room.events);
+  document.getElementById('roomScheduleModal').classList.add('active');
+}
+
+function renderModalRoomEvents(events) {
+  const container = document.getElementById('modalRoomEventsList');
+  if (!events || events.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state" style="padding: 24px 10px;">
+        <div class="empty-icon">🟢</div>
+        <h3>Aula Libera</h3>
+        <p>Nessuna lezione o evento programmato in quest'aula per questa giornata.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = events.map(e => `
+    <div class="timeline-item">
+      <div class="timeline-header">
+        <span class="timeline-time">${escapeHtml(e.from)} - ${escapeHtml(e.to)}</span>
+        <span class="badge-status" style="font-size:0.7rem;">${escapeHtml(e.type)}</span>
+      </div>
+      <div class="timeline-name">${escapeHtml(e.name)}</div>
+      ${e.docenti && e.docenti.length ? `<div class="timeline-docente">👤 ${escapeHtml(e.docenti.join(', '))}</div>` : ''}
+      ${e.description ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">${escapeHtml(e.description)}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+async function changeModalRoomDay(deltaDays) {
+  const dt = isoToDate(roomsState.modalDate);
+  dt.setDate(dt.getDate() + deltaDays);
+  roomsState.modalDate = formatDateIso(dt);
+  document.getElementById('modalDateLabel').textContent = isoToDisplayDate(roomsState.modalDate);
+
+  const container = document.getElementById('modalRoomEventsList');
+  container.innerHTML = '<div class="spinner" style="margin:20px auto;"></div>';
+
+  try {
+    const apiDate = isoToFormatted(roomsState.modalDate);
+    const data = await fetchJson(`/api/rooms?sede=${encodeURIComponent(roomsState.selectedBuilding)}&date=${encodeURIComponent(apiDate)}`);
+    const found = (data.rooms || []).find(r => r.code === roomsState.modalRoom.code);
+    renderModalRoomEvents(found ? found.events : []);
+  } catch (err) {
+    container.innerHTML = '<p style="color:var(--danger); text-align:center;">Errore durante il caricamento.</p>';
+  }
+}
+
+// ---------- Exam Calendar (Calendario Esami) ----------
+
+function loadExamCourses() {
+  try {
+    const raw = localStorage.getItem(EXAM_COURSES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveExamCourses(courses) {
+  try {
+    localStorage.setItem(EXAM_COURSES_KEY, JSON.stringify(courses));
+  } catch (e) {
+    console.warn('Error saving exam courses', e);
+  }
+}
+
+function getActiveExamCourses() {
+  const courses = [];
+  if (state.config && state.config.corso) {
+    courses.push({
+      code: state.config.corso,
+      label: state.config.corsoLabel || state.config.corso,
+      isPrimary: true
+    });
+  }
+  (examsState.extraCourses || []).forEach(c => {
+    if (!courses.some(existing => existing.code === c.code)) {
+      courses.push({
+        code: c.code,
+        label: c.label || c.code,
+        isPrimary: false
+      });
+    }
+  });
+  return courses;
+}
+
+function renderExamCourseChips() {
+  const container = document.getElementById('examCoursesChips');
+  if (!container) return;
+  const courses = getActiveExamCourses();
+
+  if (courses.length === 0) {
+    container.innerHTML = `
+      <span style="font-size:0.8rem; color:var(--text-muted);">Nessun corso selezionato.</span>
+      <button id="btnChipAdd" class="course-chip course-chip-add">➕ Aggiungi corso</button>
+    `;
+    const btn = document.getElementById('btnChipAdd');
+    if (btn) btn.addEventListener('click', openAddExamCourseModal);
+    return;
+  }
+
+  container.innerHTML = courses.map(c => `
+    <div class="course-chip ${c.isPrimary ? 'primary' : 'extra'}">
+      <span>${c.isPrimary ? '⭐ ' : '🎓 '}${escapeHtml(c.label)} [${escapeHtml(c.code)}]</span>
+      ${!c.isPrimary ? `<button class="btn-remove-chip" data-code="${escapeHtml(c.code)}" title="Rimuovi">✕</button>` : ''}
+    </div>
+  `).join('') + '<button id="btnChipAdd" class="course-chip course-chip-add">➕ Aggiungi corso</button>';
+
+  const btnAdd = document.getElementById('btnChipAdd');
+  if (btnAdd) btnAdd.addEventListener('click', openAddExamCourseModal);
+
+  container.querySelectorAll('.btn-remove-chip').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const code = btn.getAttribute('data-code');
+      removeExamCourse(code);
+    });
+  });
+}
+
+function initExamsView() {
+  renderExamCourseChips();
+  if (!examsState.exams.length) {
+    loadExams();
+  }
+}
+
+function getExamDateRange(sessionType) {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+
+  if (sessionType === 'winter') {
+    const yr = currentMonth >= 9 ? currentYear + 1 : currentYear;
+    return { from: `01-01-${yr}`, to: `28-02-${yr}` };
+  } else if (sessionType === 'summer') {
+    const yr = currentMonth >= 9 ? currentYear + 1 : currentYear;
+    return { from: `01-06-${yr}`, to: `31-07-${yr}` };
+  } else if (sessionType === 'autumn') {
+    return { from: `01-09-${currentYear}`, to: `31-10-${currentYear}` };
+  } else if (sessionType === 'custom') {
+    const from = document.getElementById('examDateFrom').value;
+    const to = document.getElementById('examDateTo').value;
+    return {
+      from: from ? isoToFormatted(from) : formatFormattedDate(now),
+      to: to ? isoToFormatted(to) : formatFormattedDate(new Date(now.getTime() + 90 * 86400000))
+    };
+  } else {
+    // Default: next 120 days from today
+    const future = new Date(now.getTime() + 120 * 86400000);
+    return { from: formatFormattedDate(now), to: formatFormattedDate(future) };
+  }
+}
+
+async function loadExams(forceRefresh = false) {
+  const courses = getActiveExamCourses();
+  if (courses.length === 0) {
+    document.getElementById('examsSummaryBanner').style.display = 'none';
+    document.getElementById('examsContainer').innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📝</div>
+        <h3>Nessun corso per gli esami</h3>
+        <p>Configura il tuo corso di studi o aggiungi corsi con il pulsante <strong>+ Aggiungi corso</strong>.</p>
+        <button class="btn-primary" style="margin-top:15px; width:auto;" onclick="openAddExamCourseModal()">➕ Aggiungi corso</button>
+      </div>
+    `;
+    return;
+  }
+
+  const spinner = document.getElementById('examsSpinnerContainer');
+  const container = document.getElementById('examsContainer');
+  spinner.style.display = 'block';
+  container.style.display = 'none';
+
+  const dateRange = getExamDateRange(examsState.activeSession);
+  const courseCodes = courses.map(c => c.code).join(',');
+
+  const params = new URLSearchParams({
+    corsi: courseCodes,
+    datefrom: dateRange.from,
+    dateto: dateRange.to
+  });
+  if (examsState.yearFilter) params.set('anni', examsState.yearFilter);
+  if (examsState.searchQuery) params.set('q', examsState.searchQuery);
+
+  try {
+    const data = await fetchJson(`/api/exams?${params}`);
+    examsState.exams = data.exams || [];
+
+    spinner.style.display = 'none';
+    container.style.display = 'block';
+
+    document.getElementById('examsSummaryBanner').style.display = 'flex';
+    document.getElementById('examsCountText').textContent = `${examsState.exams.length} ${examsState.exams.length === 1 ? 'appello trovato' : 'appelli trovati'}`;
+
+    renderExams();
+    if (forceRefresh) showToast('Appelli d\'esame aggiornati!');
+  } catch (err) {
+    spinner.style.display = 'none';
+    container.style.display = 'block';
+    console.error('Error loading exams:', err);
+    showToast('Impossibile caricare gli appelli d\'esame');
+  }
+}
+
+function renderExams() {
+  const container = document.getElementById('examsContainer');
+  if (!examsState.exams || examsState.exams.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">🔍</div>
+        <h3>Nessun appello trovato</h3>
+        <p>Nessun esame programmato nel periodo selezionato per i corsi monitorati. Prova a selezionare un'altra sessione o verificare i filtri.</p>
+      </div>
+    `;
+    return;
+  }
+
+  // Group exams by date
+  const groups = {};
+  examsState.exams.forEach(ex => {
+    const key = ex.date;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(ex);
+  });
+
+  container.innerHTML = Object.keys(groups).sort().map(dateKey => {
+    const list = groups[dateKey];
+    const first = list[0];
+    const dateHeader = `📅 ${first.day_name} ${first.date_formatted}`;
+
+    const cardsHtml = list.map(ex => {
+      const courseInfo = ex.courses && ex.courses.length ? ex.courses[0] : null;
+      const courseBadge = courseInfo ? `🎓 ${escapeHtml(courseInfo.title || courseInfo.code)}${courseInfo.year ? ' · ' + courseInfo.year + '° anno' : ''}` : '';
+
+      return `
+        <div class="exam-card">
+          <div class="exam-top">
+            <div class="exam-title">${escapeHtml(ex.name)}</div>
+            <span class="exam-time-badge">${escapeHtml(ex.time_label)}</span>
+          </div>
+
+          <div class="exam-meta-grid">
+            ${courseBadge ? `<span class="exam-meta-item course">${courseBadge}</span>` : ''}
+            <span class="exam-meta-item">📍 ${escapeHtml(ex.aula || 'Aula da definire')} ${ex.sede ? '· ' + escapeHtml(ex.sede) : ''}</span>
+            ${ex.docenti && ex.docenti.length ? `<span class="exam-meta-item">👤 Prof. ${escapeHtml(ex.docenti.join(', '))}</span>` : ''}
+            ${ex.appello ? `<span class="badge-status" style="font-size:0.7rem;">Appello ${escapeHtml(ex.appello)}</span>` : ''}
+          </div>
+
+          <div class="exam-actions">
+            <button class="btn-add-cal" data-id="${escapeHtml(ex.id)}">
+              📅 Salva nel calendario
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="exams-date-group">
+        <div class="exams-date-header">${dateHeader}</div>
+        ${cardsHtml}
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('.btn-add-cal').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute('data-id');
+      const ex = examsState.exams.find(item => item.id == id);
+      if (ex) downloadExamIcs(ex);
+    });
+  });
+}
+
+function downloadExamIcs(exam) {
+  const dateClean = (exam.date || '').replace(/-/g, '');
+  const startClean = (exam.from || '09:00').replace(/:/g, '') + '00';
+  const endClean = (exam.to || '12:00').replace(/:/g, '') + '00';
+  const dtStart = `${dateClean}T${startClean}`;
+  const dtEnd = `${dateClean}T${endClean}`;
+  const summary = `Esame: ${exam.name}`;
+  const location = `${exam.aula || ''} - ${exam.sede || ''}`.trim();
+  const description = `Appello d'esame: ${exam.name}\nDocente: ${(exam.docenti || []).join(', ')}\n${exam.appello ? 'Appello n. ' + exam.appello : ''}`;
+
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//UNIMIB Orari//IT',
+    'CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT',
+    `UID:exam-${exam.id || Date.now()}@unimib.it`,
+    `DTSTAMP:${dateClean}T000000Z`,
+    `DTSTART:${dtStart}`,
+    `DTEND:${dtEnd}`,
+    `SUMMARY:${summary.replace(/,/g, '\\,')}`,
+    `LOCATION:${location.replace(/,/g, '\\,')}`,
+    `DESCRIPTION:${description.replace(/\n/g, '\\n').replace(/,/g, '\\,')}`,
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `esame_${exam.name.replace(/[^a-zA-Z0-9]/g, '_')}.ics`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  showToast('File calendario (.ics) scaricato!');
+}
+
+let addExamCourseData = {
+  areas: [],
+  courses: []
+};
+
+async function openAddExamCourseModal() {
+  const modal = document.getElementById('addExamCourseModal');
+  modal.classList.add('active');
+
+  const areaSelect = document.getElementById('addExamCourseArea');
+  const courseSelect = document.getElementById('addExamCourseSelect');
+  const customInput = document.getElementById('addExamCourseCustomCode');
+  const btnConfirm = document.getElementById('btnConfirmAddExamCourse');
+
+  customInput.value = '';
+  btnConfirm.disabled = true;
+
+  if (!addExamCourseData.areas.length) {
+    areaSelect.innerHTML = '<option value="">Caricamento aree...</option>';
+    courseSelect.disabled = true;
+    try {
+      const yr = state.config ? state.config.anno : '2026';
+      const data = await fetchJson(`/api/options?anno=${yr}`);
+      addExamCourseData.areas = data.areas || [];
+      addExamCourseData.courses = data.courses || [];
+
+      areaSelect.innerHTML = '<option value="">-- Seleziona Area Didattica --</option>' + 
+        addExamCourseData.areas.map(a => `<option value="${escapeHtml(a.value)}">${escapeHtml(a.label)}</option>`).join('');
+    } catch (err) {
+      areaSelect.innerHTML = '<option value="">Errore caricamento aree</option>';
+    }
+  }
+}
+
+function closeAddExamCourseModal() {
+  document.getElementById('addExamCourseModal').classList.remove('active');
+}
+
+function onAddExamCourseAreaChange() {
+  const areaVal = document.getElementById('addExamCourseArea').value;
+  const courseSelect = document.getElementById('addExamCourseSelect');
+  const btnConfirm = document.getElementById('btnConfirmAddExamCourse');
+
+  if (!areaVal) {
+    courseSelect.innerHTML = '<option value="">Seleziona prima l\'area</option>';
+    courseSelect.disabled = true;
+    btnConfirm.disabled = !document.getElementById('addExamCourseCustomCode').value.trim();
+    return;
+  }
+
+  const matching = addExamCourseData.courses.filter(c => c.area === areaVal);
+  courseSelect.innerHTML = '<option value="">-- Seleziona Corso --</option>' +
+    matching.map(c => `<option value="${escapeHtml(c.value)}" data-label="${escapeHtml(c.label)}">${escapeHtml(c.label)} [${escapeHtml(c.value)}]</option>`).join('');
+  courseSelect.disabled = false;
+}
+
+function onAddExamCourseSelectChange() {
+  const courseSelect = document.getElementById('addExamCourseSelect');
+  const btnConfirm = document.getElementById('btnConfirmAddExamCourse');
+  const customInput = document.getElementById('addExamCourseCustomCode');
+
+  if (courseSelect.value) {
+    customInput.value = '';
+    btnConfirm.disabled = false;
+  } else {
+    btnConfirm.disabled = !customInput.value.trim();
+  }
+}
+
+function onAddExamCourseCustomCodeInput() {
+  const customInput = document.getElementById('addExamCourseCustomCode');
+  const courseSelect = document.getElementById('addExamCourseSelect');
+  const btnConfirm = document.getElementById('btnConfirmAddExamCourse');
+
+  if (customInput.value.trim()) {
+    courseSelect.value = '';
+    btnConfirm.disabled = false;
+  } else {
+    btnConfirm.disabled = !courseSelect.value;
+  }
+}
+
+function confirmAddExamCourse() {
+  const courseSelect = document.getElementById('addExamCourseSelect');
+  const customInput = document.getElementById('addExamCourseCustomCode');
+
+  let code = '';
+  let label = '';
+
+  if (courseSelect.value) {
+    code = courseSelect.value.trim().toUpperCase();
+    const opt = courseSelect.selectedOptions[0];
+    label = opt.getAttribute('data-label') || code;
+  } else if (customInput.value.trim()) {
+    code = customInput.value.trim().toUpperCase();
+    label = code;
+  }
+
+  if (!code) return;
+
+  const active = getActiveExamCourses();
+  if (active.some(c => c.code === code)) {
+    showToast('Corso già presente nei corsi monitorati!');
+    closeAddExamCourseModal();
+    return;
+  }
+
+  examsState.extraCourses.push({ code, label });
+  saveExamCourses(examsState.extraCourses);
+  renderExamCourseChips();
+  closeAddExamCourseModal();
+  showToast(`Aggiunto corso ${label}`);
+  loadExams();
+}
+
+function removeExamCourse(code) {
+  examsState.extraCourses = examsState.extraCourses.filter(c => c.code !== code);
+  saveExamCourses(examsState.extraCourses);
+  renderExamCourseChips();
+  showToast('Corso rimosso dal calendario esami');
+  loadExams();
+}
+
