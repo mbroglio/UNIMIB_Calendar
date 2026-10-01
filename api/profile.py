@@ -1,34 +1,33 @@
 """
-UNIMIB Calendar – Profile API
-==============================
-Stores and retrieves user profiles (anonymous) in Upstash Redis.
+UNIMIB Calendar – Profile & Share API
+======================================
+Stores and retrieves user profiles in Upstash Redis.
 
-Profile schema (stored as JSON string at key "profile:<id>"):
-{
-  "id":           "<8-char alphanumeric>",
-  "nickname":     "Mario",           # user-chosen display name
-  "pin_hash":     "<sha256 hex>",    # SHA-256 of PIN+id (never plain-text)
-  "config":       { ... },           # UNIMIB config object
-  "exam_courses": [ ... ],           # extra exam courses
-  "updated_at":   1234567890         # unix timestamp
-}
+Authentication & Privacy Model:
+- Personal Login (private): Soprannome + PIN (4-8 digits)
+  Stored at key "account:<clean_nickname>" with salted SHA-256 PIN hash.
+  Never shared with friends.
+- Calendar Sharing (public): Read-only unique Calendar Code (e.g. "K9X2P4")
+  Stored at key "share:<share_code>".
+  Friends use this code or a share link (?friend=K9X2P4) to view the schedule.
+  Cannot be used to modify or access the account.
 
-Endpoints
----------
-GET  /api/profile?id=<ID>                  – fetch profile (public fields: id, nickname, config, exam_courses)
-POST /api/profile                           – create new profile   body: {nickname, pin, config, exam_courses}
-PUT  /api/profile?id=<ID>                  – update profile       body: {pin, config, exam_courses, [nickname]}
-GET  /api/profile?lookup=<NICKNAME>        – find profile IDs by nickname (returns list of {id, nickname})
+Endpoints:
+- POST /api/profile                     – create account {nickname, pin, config, exam_courses}
+- PUT  /api/profile                     – login or update {nickname, pin, config, exam_courses}
+- GET  /api/profile?code=<SHARE_CODE>   – resolve public friend calendar by share code
+- GET  /api/profile?id=<ID>             – resolve by ID or share code (backward compatible)
 """
 
 import os
 import json
 import re
 import hashlib
+import secrets
 import time
+from http.server import BaseHTTPRequestHandler
 import urllib.request
 import urllib.parse
-from http.server import BaseHTTPRequestHandler
 
 def _get_redis_creds():
     url = (
@@ -45,22 +44,20 @@ def _get_redis_creds():
     ).strip().strip('"').strip("'")
     return url, token
 
-MAX_LOOKUP = 10  # max results for nickname lookup
+# Unambiguous characters for share codes (no 0/O, 1/I)
+SHARE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+SHARE_CODE_LEN = 6
 
 
 # ── Redis helpers ──────────────────────────────────────────────────────────────
 
 def _redis(method: str, *args):
-    """
-    Execute a single Redis command via the Upstash REST API.
-    Returns the 'result' field of the JSON response, or raises RuntimeError.
-    """
     url, token = _get_redis_creds()
     if not url or not token:
         raise RuntimeError(f"Upstash Redis env vars not configured: URL={'OK' if url else 'MISSING'}, TOKEN={'OK' if token else 'MISSING'}")
 
-    path  = "/" + "/".join(urllib.parse.quote(str(a), safe="") for a in (method, *args))
-    req   = urllib.request.Request(url + path, headers={"Authorization": f"Bearer {token}"})
+    path = "/" + "/".join(urllib.parse.quote(str(a), safe="") for a in (method, *args))
+    req  = urllib.request.Request(url + path, headers={"Authorization": f"Bearer {token}"})
     with urllib.request.urlopen(req, timeout=5) as resp:
         body = json.loads(resp.read())
     if "error" in body:
@@ -85,43 +82,24 @@ def redis_del(key: str):
     _redis("DEL", key)
 
 
-# Nickname index: set "nick:<lowercase_nickname>" → {"<id>": 1, ...} (using a JSON object as a poor-man's set)
-def _nick_key(nickname: str) -> str:
-    return f"nick:{nickname.strip().lower()}"
-
-
-def _add_to_nick_index(nickname: str, profile_id: str):
-    key  = _nick_key(nickname)
-    data = redis_get(key) or {}
-    data[profile_id] = 1
-    redis_set(key, data)
-
-
-def _remove_from_nick_index(old_nickname: str, profile_id: str):
-    key  = _nick_key(old_nickname)
-    data = redis_get(key) or {}
-    data.pop(profile_id, None)
-    if data:
-        redis_set(key, data)
-    else:
-        redis_del(key)
-
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _clean_nickname(n: str) -> str:
     return re.sub(r'[^A-Za-z0-9_-]', '', n.strip()).lower()
 
 
-def _hash_pin(pin: str, profile_id: str) -> str:
-    """SHA-256 of (pin + ":" + id) – salted with the profile id."""
-    raw = f"{pin}:{profile_id.lower()}".encode()
+def _gen_share_code() -> str:
+    return "".join(secrets.choice(SHARE_CHARS) for _ in range(SHARE_CODE_LEN))
+
+
+def _hash_pin(pin: str, clean_nick: str) -> str:
+    raw = f"{pin}:{clean_nick}".encode()
     return hashlib.sha256(raw).hexdigest()
 
 
-def _verify_pin(pin: str, profile_id: str, stored_hash: str) -> bool:
-    return _hash_pin(pin, profile_id) == stored_hash
+def _verify_pin(pin: str, clean_nick: str, stored_hash: str) -> bool:
+    return _hash_pin(pin, clean_nick) == stored_hash
 
-
-# ── Validation helpers ─────────────────────────────────────────────────────────
 
 def _valid_nickname(n) -> bool:
     return isinstance(n, str) and 1 <= len(n.strip()) <= 30
@@ -129,15 +107,6 @@ def _valid_nickname(n) -> bool:
 
 def _valid_pin(p) -> bool:
     return isinstance(p, str) and p.isdigit() and 4 <= len(p) <= 8
-
-
-def _valid_id(i) -> bool:
-    return isinstance(i, str) and 3 <= len(i.strip()) <= 40 and bool(re.fullmatch(r'[A-Za-z0-9_-]+', i.strip()))
-
-
-def _public_profile(profile: dict) -> dict:
-    """Strip sensitive fields before returning to the client."""
-    return {k: v for k, v in profile.items() if k != "pin_hash"}
 
 
 # ── HTTP Handler ───────────────────────────────────────────────────────────────
@@ -173,112 +142,202 @@ class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         qs = self._qs()
         try:
-            # ── Lookup by nickname ─────────────────────────────────────────
-            if "lookup" in qs:
-                nickname = qs["lookup"].strip()
-                if not nickname:
-                    return self._send_json(400, {"error": "Empty lookup"})
-                data  = redis_get(_nick_key(nickname)) or {}
-                ids   = list(data.keys())[:MAX_LOOKUP]
-                # Fetch profiles to return {id, nickname} pairs
-                results = []
-                for pid in ids:
-                    p = redis_get(f"profile:{pid}")
-                    if p:
-                        results.append({"id": pid, "nickname": p.get("nickname", pid)})
-                return self._send_json(200, {"results": results})
+            # ── 1. Fetch friend by share code (?code=K9X2P4) ───────────────────
+            code = qs.get("code", "").strip().upper()
+            if code:
+                share = redis_get(f"share:{code.lower()}")
+                if not share:
+                    return self._send_json(404, {"error": "Codice calendario non trovato"})
+                return self._send_json(200, {
+                    "id":         share.get("share_code", code),
+                    "share_code": share.get("share_code", code),
+                    "nickname":   share.get("nickname", "Amico"),
+                    "config":     share.get("config")
+                })
 
-            # ── Fetch profile by ID ────────────────────────────────────────
-            pid = qs.get("id", "").strip().lower()
-            if not pid:
-                return self._send_json(400, {"error": "Missing id or lookup parameter"})
-            if not _valid_id(pid):
-                return self._send_json(400, {"error": "ID profilo non valido"})
+            # ── 2. Fetch by ID (backward compatibility) ────────────────────────
+            pid = qs.get("id", "").strip()
+            if pid:
+                # Check share code first
+                share = redis_get(f"share:{pid.lower()}")
+                if share:
+                    return self._send_json(200, {
+                        "id":         share.get("share_code", pid),
+                        "share_code": share.get("share_code", pid),
+                        "nickname":   share.get("nickname", "Amico"),
+                        "config":     share.get("config")
+                    })
+                # Check account
+                acc = redis_get(f"account:{pid.lower()}")
+                if acc:
+                    return self._send_json(200, {
+                        "id":           acc.get("share_code", pid),
+                        "share_code":   acc.get("share_code", pid),
+                        "nickname":     acc.get("nickname", pid),
+                        "config":       acc.get("config"),
+                        "exam_courses": acc.get("exam_courses", [])
+                    })
+                # Legacy profile:<id>
+                legacy = redis_get(f"profile:{pid}")
+                if legacy:
+                    legacy.pop("pin_hash", None)
+                    return self._send_json(200, legacy)
 
-            profile = redis_get(f"profile:{pid}")
-            if not profile:
-                return self._send_json(404, {"error": "Profilo non trovato"})
-            return self._send_json(200, _public_profile(profile))
+                return self._send_json(404, {"error": "Calendario non trovato"})
+
+            return self._send_json(400, {"error": "Specificare il parametro 'code' o 'id'"})
 
         except Exception as e:
             return self._send_json(500, {"error": str(e)})
 
     def do_POST(self):
-        """Create a new profile."""
+        """Create a new account (Soprannome + PIN). Generates a public share_code."""
         try:
-            body = self._read_body()
+            body        = self._read_body()
             nickname    = str(body.get("nickname", "")).strip()
             pin         = str(body.get("pin", "")).strip()
             config      = body.get("config")
             exam_courses = body.get("exam_courses", [])
 
             if not _valid_nickname(nickname):
-                return self._send_json(400, {"error": "Nickname non valido (1-30 caratteri)"})
+                return self._send_json(400, {"error": "Soprannome non valido (1-30 caratteri)"})
             if not _valid_pin(pin):
-                return self._send_json(400, {"error": "PIN non valido (4-8 cifre numeriche)"})
+                return self._send_json(400, {"error": "Il PIN deve essere di 4-8 cifre numeriche"})
 
             clean_nick = _clean_nickname(nickname)
             if not clean_nick:
-                return self._send_json(400, {"error": "Il soprannome deve contenere lettere o cifre"})
+                return self._send_json(400, {"error": "Il soprannome deve contenere caratteri alfanumerici"})
 
-            pid = f"{clean_nick}{pin}"
-
-            if redis_get(f"profile:{pid}"):
+            # Check if this account already exists
+            existing = redis_get(f"account:{clean_nick}")
+            if existing:
                 return self._send_json(409, {
-                    "error": f"Esiste già un profilo per '{nickname}' con questo PIN. Se è il tuo, passa alla scheda Accedi."
+                    "error": f"Il soprannome '{nickname}' è già registrato. Vai su 'Accedi' per entrare col tuo PIN, oppure scegli un altro soprannome."
                 })
 
-            profile = {
-                "id":           pid,
+            # Generate unique 6-character public share code
+            share_code = None
+            for _ in range(10):
+                candidate = _gen_share_code()
+                if not redis_get(f"share:{candidate.lower()}"):
+                    share_code = candidate
+                    break
+
+            if not share_code:
+                share_code = _gen_share_code()
+
+            account = {
                 "nickname":     nickname,
-                "pin_hash":     _hash_pin(pin, pid),
+                "clean_nick":   clean_nick,
+                "pin_hash":     _hash_pin(pin, clean_nick),
+                "share_code":   share_code,
                 "config":       config,
                 "exam_courses": exam_courses,
                 "updated_at":   int(time.time())
             }
-            redis_set(f"profile:{pid}", profile)
-            _add_to_nick_index(nickname, pid)
+            redis_set(f"account:{clean_nick}", account)
 
-            return self._send_json(201, _public_profile(profile))
+            # Public share entry (read-only for friends, no pin_hash)
+            share_entry = {
+                "clean_nick": clean_nick,
+                "nickname":   nickname,
+                "share_code": share_code,
+                "config":     config,
+                "updated_at": int(time.time())
+            }
+            redis_set(f"share:{share_code.lower()}", share_entry)
+
+            return self._send_json(201, {
+                "nickname":     nickname,
+                "share_code":   share_code,
+                "config":       config,
+                "exam_courses": exam_courses
+            })
 
         except Exception as e:
             return self._send_json(500, {"error": str(e)})
 
     def do_PUT(self):
-        """Update an existing profile (PIN required)."""
+        """
+        Login or Update account.
+        Requires { nickname, pin } in body.
+        Verifies PIN, updates config if provided, returns public share_code.
+        """
         try:
-            qs  = self._qs()
-            pid = qs.get("id", "").strip().lower()
-            if not _valid_id(pid):
-                return self._send_json(400, {"error": "ID profilo non valido"})
+            body     = self._read_body()
+            qs       = self._qs()
+            nickname = str(body.get("nickname") or qs.get("nick") or qs.get("id", "")).strip()
+            pin      = str(body.get("pin", "")).strip()
 
-            profile = redis_get(f"profile:{pid}")
-            if not profile:
-                return self._send_json(404, {"error": "Profilo non trovato. Verifica soprannome e PIN."})
+            if not nickname:
+                return self._send_json(400, {"error": "Inserisci il soprannome"})
+            if not pin:
+                return self._send_json(400, {"error": "Inserisci il PIN"})
 
-            body = self._read_body()
-            pin  = str(body.get("pin", ""))
-            if not _verify_pin(pin, pid, profile.get("pin_hash", "")):
+            clean_nick = _clean_nickname(nickname)
+            account = redis_get(f"account:{clean_nick}")
+
+            # Backward-compatibility fallback: check if key is in legacy format
+            if not account:
+                legacy = redis_get(f"profile:{clean_nick}") or redis_get(f"profile:{clean_nick}{pin}")
+                if legacy and _verify_pin(pin, legacy.get("id", clean_nick), legacy.get("pin_hash", "")):
+                    # Migrate to account:
+                    share_code = _gen_share_code()
+                    account = {
+                        "nickname":     legacy.get("nickname", nickname),
+                        "clean_nick":   clean_nick,
+                        "pin_hash":     _hash_pin(pin, clean_nick),
+                        "share_code":   share_code,
+                        "config":       legacy.get("config"),
+                        "exam_courses": legacy.get("exam_courses", []),
+                        "updated_at":   int(time.time())
+                    }
+                    redis_set(f"account:{clean_nick}", account)
+                    redis_set(f"share:{share_code.lower()}", {
+                        "clean_nick": clean_nick,
+                        "nickname":   account["nickname"],
+                        "share_code": share_code,
+                        "config":     account["config"]
+                    })
+
+            if not account:
+                return self._send_json(404, {"error": f"Nessun account trovato per '{nickname}'. Verifica il soprannome o crea un nuovo profilo."})
+
+            if not _verify_pin(pin, clean_nick, account.get("pin_hash", "")):
                 return self._send_json(403, {"error": "PIN non corretto"})
 
-            # Updateable fields
-            if "config" in body:
-                profile["config"] = body["config"]
-            if "exam_courses" in body:
-                profile["exam_courses"] = body["exam_courses"]
-            if "nickname" in body:
-                new_nick = str(body["nickname"]).strip()
-                if _valid_nickname(new_nick) and new_nick != profile.get("nickname"):
-                    _remove_from_nick_index(profile["nickname"], pid)
-                    profile["nickname"] = new_nick
-                    _add_to_nick_index(new_nick, pid)
+            share_code = account.get("share_code")
+            if not share_code:
+                share_code = _gen_share_code()
+                account["share_code"] = share_code
 
-            profile["updated_at"] = int(time.time())
-            redis_set(f"profile:{pid}", profile)
-            return self._send_json(200, _public_profile(profile))
+            # Update data if sent
+            if "config" in body and body["config"] is not None:
+                account["config"] = body["config"]
+            if "exam_courses" in body and body["exam_courses"] is not None:
+                account["exam_courses"] = body["exam_courses"]
+
+            account["updated_at"] = int(time.time())
+            redis_set(f"account:{clean_nick}", account)
+
+            # Keep public share entry in sync with updated schedule
+            redis_set(f"share:{share_code.lower()}", {
+                "clean_nick": clean_nick,
+                "nickname":   account["nickname"],
+                "share_code": share_code,
+                "config":     account.get("config"),
+                "updated_at": int(time.time())
+            })
+
+            return self._send_json(200, {
+                "nickname":     account["nickname"],
+                "share_code":   share_code,
+                "config":       account.get("config"),
+                "exam_courses": account.get("exam_courses", [])
+            })
 
         except Exception as e:
             return self._send_json(500, {"error": str(e)})
 
     def log_message(self, *args):
-        pass  # silence Vercel access logs
+        pass

@@ -32,15 +32,16 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 - **📅 Add to Calendar (.ics)**: Download an `.ics` file for any exam appeal to import it directly into Apple Calendar, Google Calendar, or Outlook.
 
 ### 4. 👤 Cloud Profile & Synchronisation (No Complex Passwords)
-- **🔑 Memorable Auth (Nickname + PIN)**: No email or password needed. Create a profile with your chosen **Soprannome** (e.g. `Mario`) and a 4-digit **PIN** (e.g. `1234`).
+- **🔑 Memorable Auth (Nickname + PIN)**: No email or password needed. Create an account with your chosen **Soprannome** (e.g. `Mario`) and a 4-8 digit **PIN** (e.g. `1234`).
 - **📱 Multi-Device Sync**: Log in on any device (iPhone, laptop, tablet) simply by entering your Soprannome and PIN. Your study plan, favorite courses, and monitored exams sync automatically.
 - **⚡ First-Visit Onboarding**: First-time visitors can choose to create a profile, log in to restore an existing plan, or **Continua come ospite** (Guest mode) to start immediately without registration.
 - **☁️ Serverless Storage**: Backed by **Upstash Redis REST API**, salted with SHA-256 for secure PIN verification.
 
 ### 5. 👥 Friends Shared Calendar (Calendario Amici)
+- **🔒 Privacy First (Zero Leaked Credentials)**: Your PIN remains private for your own devices. The system generates a distinct, anonymous 6-character **Codice Calendario Univoco** (e.g. `K9X2P4`) used exclusively for sharing with friends.
+- **🔗 Instant Link or Code Sharing**: Add friends by entering their 6-character calendar code, or send them a direct link (e.g. `/?friend=K9X2P4`) which automatically adds them to their calendar with a single tap.
 - **🤝 Compare Timetables**: See your schedule and your friends' schedules combined on a single weekly calendar with distinct color-coded badges to easily spot common free hours and overlapping classes.
-- **➕ Easy Friend Discovery**: Add friends using their memorable identifier (e.g. `mario1234`) or search them by nickname.
-- **🔗 One-Tap Group Link**: Click **🔗 Condividi** to generate a link (e.g. `/?group=mario1234,luca5678`). When friends open the link, the entire group is automatically loaded into their Friends tab.
+- **👥 One-Tap Group Links**: Click **🔗 Condividi Gruppo** to generate a link (e.g. `/?group=K9X2P4,W3M7R2`) so an entire study group can load all friends at once.
 
 ---
 
@@ -89,11 +90,10 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 | `GET` | `/api/calendar` | Returns lessons for selected degree course and study years for a given week |
 | `GET` | `/api/rooms` | Returns real-time room occupancy and daily schedule for a campus building |
 | `GET` | `/api/exams` | Returns upcoming exam appeals filtered by degree courses, years, and date range |
-| `POST` | `/api/profile` | Creates a new student profile (`{ nickname, pin, config, exam_courses }`) |
-| `GET` | `/api/profile?id=<ID>` | Fetches public profile configuration by ID (`<nickname><pin>`) |
-| `GET` | `/api/profile?lookup=<NAME>` | Searches profiles by nickname |
-| `PUT` | `/api/profile?id=<ID>` | Updates profile configuration (requires PIN in body) |
-| `GET` | `/api/shared_calendar?ids=ID1,ID2` | Returns merged weekly timetable for multiple student profiles |
+| `POST` | `/api/profile` | Creates a new account (`{ nickname, pin, config, exam_courses }`) and returns generated `share_code` |
+| `PUT` | `/api/profile` | Authenticates / updates account (`{ nickname, pin, config?, exam_courses? }`) and syncs cloud schedule |
+| `GET` | `/api/profile?code=<CODE>` | Fetches friend's public schedule and nickname using their 6-char share code |
+| `GET` | `/api/shared_calendar?codes=C1,C2` | Returns merged weekly timetable for multiple student share codes |
 
 ---
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'unimib-calendar-v9';
+const CACHE_NAME = 'unimib-calendar-v10';
 const ASSETS = [
   '/',
   '/css/style.css',
@@ -33,14 +33,20 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.url.includes('/api/')) {
+    // Non-GET requests (POST, PUT) bypass cache completely
+    if (event.request.method !== 'GET') {
+      return;
+    }
     // Network first for API, fallback to cache
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          const resClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, resClone);
-          });
+          if (response.ok) {
+            const resClone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, resClone);
+            });
+          }
           return response;
         })
         .catch(() => caches.match(event.request))

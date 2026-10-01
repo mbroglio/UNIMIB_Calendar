@@ -545,17 +545,23 @@
 
       <!-- Logged in state -->
       <div id="profileLoggedIn" style="display:none;">
-        <div class="profile-id-box">
-          <div>
-            <span class="profile-nickname" id="profileDisplayNickname">Mario</span>
-            <span style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-top:2px;">Il tuo codice per gli amici:</span>
-            <span class="profile-id-code" id="profileDisplayId">mario1234</span>
+        <div class="profile-id-box" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+          <div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">
+            <div>
+              <span class="profile-nickname" id="profileDisplayNickname">Mario</span>
+              <span style="font-size:0.75rem; color:var(--text-secondary); display:block; margin-top:2px;">Codice Calendario Amici:</span>
+              <span class="profile-id-code" id="profileDisplayId">K9X2P4</span>
+            </div>
+            <button id="btnCopyProfileId" class="btn-secondary" style="width:auto; padding:6px 12px; font-size:0.8rem;" title="Copia codice">📋 Copia</button>
           </div>
-          <button id="btnCopyProfileId" class="btn-secondary" style="width:auto; padding:6px 10px; font-size:0.78rem;" title="Copia codice">📋</button>
+          <button id="btnShareMyCalLink" class="btn-primary" style="width:100%; padding:9px 12px; font-size:0.82rem; margin-top:4px;">
+            🔗 Invia link calendario agli amici
+          </button>
         </div>
 
-        <p style="font-size:0.8rem; color:var(--text-muted); margin:10px 0 16px;">
-          Per accedere su altri dispositivi usa il tuo <strong>Soprannome</strong> e <strong>PIN</strong>. Dai il codice <strong><span id="profileDisplayCodeHint">mario1234</span></strong> ai tuoi amici per condividere l'orario.
+        <p style="font-size:0.78rem; color:var(--text-muted); margin:12px 0 16px; line-height:1.45;">
+          🔒 <strong>Le tue credenziali restano private:</strong> per accedere sui tuoi dispositivi usa solo il tuo Soprannome e PIN.<br>
+          👥 <strong>Per gli amici:</strong> condividi il tuo <strong>Codice Calendario</strong> o il <strong>Link</strong>. Possono solo visualizzare l'orario senza mai vedere il tuo PIN.
         </p>
 
         <!-- Sync status -->
@@ -582,40 +588,22 @@
         <button id="btnCloseAddFriend" class="btn-icon" style="width:30px; height:30px;">✕</button>
       </div>
 
-      <div class="toggle-group" style="margin-bottom:16px;">
-        <button id="friendTabCode" class="toggle-btn active" onclick="showFriendTab('code')">🔑 Codice</button>
-        <button id="friendTabName" class="toggle-btn" onclick="showFriendTab('name')">🔍 Soprannome</button>
-      </div>
-
-      <!-- By code -->
       <div id="friendByCode">
-        <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:12px;">Inserisci il codice del tuo amico (es. mario1234).</p>
+        <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:14px; line-height:1.45;">
+          Inserisci il <strong>Codice Calendario univoco</strong> che ti ha inviato il tuo amico per visualizzare i suoi orari (oppure apri direttamente il suo link di condivisione).
+        </p>
         <div class="form-field">
-          <label for="friendCodeInput">Codice amico</label>
-          <input type="text" id="friendCodeInput" placeholder="es. mario1234" maxlength="40"
-                 style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:0.9rem; outline:none;">
+          <label for="friendCodeInput">Codice Calendario Univoco</label>
+          <input type="text" id="friendCodeInput" placeholder="es. K9X2P4" maxlength="12"
+                 style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:1rem; outline:none; text-transform:uppercase; letter-spacing:0.15em; font-family:monospace; text-align:center;">
         </div>
-        <div id="friendCodePreview" style="display:none; background:rgba(255,255,255,0.05); border-radius:10px; padding:10px 14px; margin-bottom:10px;">
-          <span id="friendCodePreviewNick" style="font-weight:700; color:var(--text-primary);"></span>
-          <span style="font-size:0.75rem; color:var(--text-muted); margin-left:6px;">trovato!</span>
+        <div id="friendCodePreview" style="display:none; background:rgba(255,255,255,0.05); border-radius:10px; padding:10px 14px; margin-bottom:10px; text-align:center;">
+          <span style="font-size:0.85rem; color:var(--text-secondary);">Trovato:</span>
+          <span id="friendCodePreviewNick" style="font-weight:700; color:var(--text-primary); font-size:1rem; margin-left:6px;"></span>
         </div>
         <p id="friendCodeError" style="color:#EF4444; font-size:0.8rem; display:none; margin-bottom:8px;"></p>
-        <button id="btnLookupFriendCode" class="btn-secondary" style="width:100%; margin-bottom:8px;">🔍 Cerca</button>
+        <button id="btnLookupFriendCode" class="btn-secondary" style="width:100%; margin-bottom:8px;">🔍 Verifica codice</button>
         <button id="btnConfirmAddFriendCode" class="btn-primary" style="width:100%;" disabled>+ Aggiungi al calendario</button>
-      </div>
-
-      <!-- By nickname -->
-      <div id="friendByName" style="display:none;">
-        <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:12px;">Cerca per soprannome. Se più persone hanno lo stesso soprannome, vedrai tutte le opzioni.</p>
-        <div class="form-field">
-          <label for="friendNameInput">Soprannome</label>
-          <input type="text" id="friendNameInput" placeholder="es. Mario" maxlength="30"
-                 style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:0.9rem; outline:none;">
-        </div>
-        <button id="btnSearchFriendName" class="btn-secondary" style="width:100%; margin-bottom:10px;">🔍 Cerca</button>
-        <div id="friendNameResults" style="display:none; max-height:180px; overflow-y:auto;">
-          <!-- Rendered dynamically -->
-        </div>
       </div>
     </div>
   </div>

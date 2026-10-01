@@ -50,13 +50,19 @@ let examsState = {
   isLoading: false
 };
 
-// Profile state (in-memory only; persisted ID stored in localStorage PROFILE_KEY)
+// Profile state: private credentials (nickname + PIN) & public shareCode
 let profileState = {
-  id:       null,   // 8-char ID (null = not logged in)
-  nickname: '',
-  syncing:  false,
-  lastSync: null
+  nickname:  '',
+  shareCode: null,   // public unique calendar code (e.g. K9X2P4)
+  syncing:   false,
+  lastSync:  null,
+  _pin:      null    // in-memory session only
 };
+// Property alias so profileState.id maps to profileState.shareCode
+Object.defineProperty(profileState, 'id', {
+  get() { return this.shareCode; },
+  set(v) { this.shareCode = v; }
+});
 
 // Friends/shared calendar state
 let friendsState = {
@@ -97,11 +103,16 @@ function initApp() {
 
   const shared = readSharedConfig();
   const urlParams = new URLSearchParams(window.location.search);
+  const friendParam = urlParams.get('friend') || urlParams.get('share_cal');
   const groupParam = urlParams.get('group');
 
   if (shared) {
     enterPreview(shared);
+  } else if (friendParam) {
+    if (state.config) applyConfig();
+    handleFriendShareUrl(friendParam);
   } else if (groupParam) {
+    if (state.config) applyConfig();
     handleSharedGroupUrl(groupParam);
   } else if (state.config) {
     applyConfig();
@@ -141,6 +152,8 @@ function setupEventListeners() {
   document.getElementById('btnLoginProfile').addEventListener('click', handleLoginProfile);
   document.getElementById('btnLogoutProfile').addEventListener('click', handleLogoutProfile);
   document.getElementById('btnCopyProfileId').addEventListener('click', copyProfileId);
+  const btnShareMyCal = document.getElementById('btnShareMyCalLink');
+  if (btnShareMyCal) btnShareMyCal.addEventListener('click', shareMyCalendarLink);
   document.getElementById('btnSyncNow').addEventListener('click', syncProfileNow);
 
   // Friends / shared calendar buttons
@@ -151,14 +164,28 @@ function setupEventListeners() {
   });
   document.getElementById('btnLookupFriendCode').addEventListener('click', lookupFriendByCode);
   document.getElementById('btnConfirmAddFriendCode').addEventListener('click', confirmAddFriendByCode);
-  document.getElementById('btnSearchFriendName').addEventListener('click', searchFriendByName);
-  document.getElementById('friendCodeInput').addEventListener('input', () => {
-    // Hide preview / error on new input
-    document.getElementById('friendCodePreview').style.display = 'none';
-    document.getElementById('friendCodeError').style.display = 'none';
-    document.getElementById('btnConfirmAddFriendCode').disabled = true;
-    document.getElementById('btnConfirmAddFriendCode')._foundProfile = null;
-  });
+  const btnSearchName = document.getElementById('btnSearchFriendName');
+  if (btnSearchName) btnSearchName.addEventListener('click', searchFriendByName);
+  const friendCodeInput = document.getElementById('friendCodeInput');
+  if (friendCodeInput) {
+    friendCodeInput.addEventListener('input', () => {
+      document.getElementById('friendCodePreview').style.display = 'none';
+      document.getElementById('friendCodeError').style.display = 'none';
+      document.getElementById('btnConfirmAddFriendCode').disabled = true;
+      document.getElementById('btnConfirmAddFriendCode')._foundProfile = null;
+    });
+    friendCodeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const confBtn = document.getElementById('btnConfirmAddFriendCode');
+        if (confBtn && !confBtn.disabled) {
+          confirmAddFriendByCode();
+        } else {
+          lookupFriendByCode();
+        }
+      }
+    });
+  }
   document.getElementById('btnFriendsPrevWeek').addEventListener('click', () => changeFriendsWeek(-7));
   document.getElementById('btnFriendsNextWeek').addEventListener('click', () => changeFriendsWeek(7));
   document.getElementById('btnFriendsToday').addEventListener('click', () => {
@@ -1990,8 +2017,8 @@ function initProfile() {
   if (stored) {
     try {
       const parsed = JSON.parse(stored);
-      profileState.id       = parsed.id;
-      profileState.nickname = parsed.nickname;
+      profileState.nickname  = parsed.nickname || '';
+      profileState.shareCode = parsed.share_code || parsed.shareCode || parsed.id || null;
     } catch (e) { /* ignore */ }
   }
   updateProfileButton();
@@ -2000,17 +2027,18 @@ function initProfile() {
 function updateProfileButton() {
   const btn = document.getElementById('btnProfile');
   if (!btn) return;
-  btn.classList.toggle('profile-active', Boolean(profileState.id));
-  btn.title = profileState.id
-    ? `${profileState.nickname} (${profileState.id})`
+  const isLogged = Boolean(profileState.nickname && profileState.shareCode);
+  btn.classList.toggle('profile-active', isLogged);
+  btn.title = isLogged
+    ? `${profileState.nickname} [Codice: ${profileState.shareCode}]`
     : 'Il tuo profilo';
 }
 
 function saveProfileLocally() {
-  if (profileState.id) {
+  if (profileState.shareCode) {
     localStorage.setItem(PROFILE_KEY, JSON.stringify({
-      id: profileState.id,
-      nickname: profileState.nickname
+      nickname:   profileState.nickname,
+      share_code: profileState.shareCode
     }));
   } else {
     localStorage.removeItem(PROFILE_KEY);
@@ -2026,15 +2054,13 @@ function openProfileModal() {
 }
 
 function renderProfileModal() {
-  const loggedIn  = Boolean(profileState.id);
+  const loggedIn = Boolean(profileState.nickname && profileState.shareCode);
   document.getElementById('profileLoggedOut').style.display = loggedIn ? 'none' : '';
   document.getElementById('profileLoggedIn').style.display  = loggedIn ? ''     : 'none';
 
   if (loggedIn) {
     document.getElementById('profileDisplayNickname').textContent = profileState.nickname;
-    document.getElementById('profileDisplayId').textContent       = profileState.id;
-    const hintEl = document.getElementById('profileDisplayCodeHint');
-    if (hintEl) hintEl.textContent = profileState.id;
+    document.getElementById('profileDisplayId').textContent       = profileState.shareCode;
     document.getElementById('profileSyncText').textContent        = profileState.lastSync
       ? `Sincronizzato il ${new Date(profileState.lastSync).toLocaleTimeString('it-IT')}`
       : 'Non ancora sincronizzato';
@@ -2061,8 +2087,8 @@ function showProfileTab(tab) {
 
 async function handleCreateProfile() {
   const nickname = document.getElementById('profileNickname').value.trim();
-  const pin      = document.getElementById('profilePin').value;
-  const pinConf  = document.getElementById('profilePinConfirm').value;
+  const pin      = document.getElementById('profilePin').value.trim();
+  const pinConf  = document.getElementById('profilePinConfirm').value.trim();
   const errEl    = document.getElementById('profileCreateError');
 
   errEl.style.display = 'none';
@@ -2105,13 +2131,13 @@ async function handleCreateProfile() {
       errEl.style.display = '';
       return;
     }
-    profileState.id       = data.id;
-    profileState.nickname = data.nickname;
-    profileState.lastSync = Date.now();
-    profileState._pin     = pin;  // session-only, for background auto-sync
+    profileState.nickname  = data.nickname;
+    profileState.shareCode = data.share_code;
+    profileState.lastSync  = Date.now();
+    profileState._pin      = pin;  // session-only, for background auto-sync
     saveProfileLocally();
     renderProfileModal();
-    showToast(`Profilo creato! Il tuo codice è: ${data.id}`);
+    showToast(`Profilo creato! Il tuo codice calendario è: ${data.share_code}`);
     setTimeout(() => {
       document.getElementById('profileModal').classList.remove('active');
       if (!state.config) openSetup();
@@ -2143,19 +2169,16 @@ async function handleLoginProfile() {
     return;
   }
 
-  const cleanNick = nick.toLowerCase().replace(/[^a-z0-9_-]/g, '');
-  const id = `${cleanNick}${pin}`;
-
   const btn = document.getElementById('btnLoginProfile');
   btn.disabled = true;
   btn.textContent = 'Accesso in corso...';
 
   try {
-    // Verify by attempting a PUT with the config — the server validates the PIN
-    const resp = await fetch(`/api/profile?id=${encodeURIComponent(id)}`, {
+    const resp = await fetch('/api/profile', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        nickname: nick,
         pin,
         config: state.config || null,
         exam_courses: examsState.extraCourses || []
@@ -2163,7 +2186,7 @@ async function handleLoginProfile() {
     });
     const data = await resp.json();
     if (resp.status === 404) {
-      errEl.textContent = 'Nessun profilo trovato per questo soprannome e PIN.';
+      errEl.textContent = data.error || `Nessun account trovato per '${nick}'.`;
       errEl.style.display = '';
       return;
     }
@@ -2178,7 +2201,6 @@ async function handleLoginProfile() {
       return;
     }
 
-    // Merge remote config into local if local is empty
     if (!state.config && data.config) {
       state.config = data.config;
       saveConfig(state.config);
@@ -2190,10 +2212,10 @@ async function handleLoginProfile() {
       saveExamCourses(examsState.extraCourses);
     }
 
-    profileState.id       = data.id;
-    profileState.nickname = data.nickname;
-    profileState.lastSync = Date.now();
-    profileState._pin     = pin;  // session-only, for background auto-sync
+    profileState.nickname  = data.nickname;
+    profileState.shareCode = data.share_code;
+    profileState.lastSync  = Date.now();
+    profileState._pin      = pin;  // session-only, for background auto-sync
     saveProfileLocally();
     renderProfileModal();
     showToast(`Bentornato, ${data.nickname}! 👋`);
@@ -2211,32 +2233,44 @@ async function handleLoginProfile() {
 }
 
 function handleLogoutProfile() {
-  profileState.id       = null;
-  profileState.nickname = '';
-  profileState.lastSync = null;
-  profileState._pin     = null;  // clear session PIN
+  profileState.shareCode = null;
+  profileState.nickname  = '';
+  profileState.lastSync  = null;
+  profileState._pin      = null;
   saveProfileLocally();
   renderProfileModal();
   showToast('Profilo rimosso da questo dispositivo');
 }
 
 async function copyProfileId() {
-  const id = profileState.id;
-  if (!id) return;
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(id);
-    } else {
-      legacyCopy(id);
-    }
-    showToast(`Codice ${id} copiato!`);
-  } catch (e) {
-    showToast(`Il tuo codice è: ${id}`);
+  const code = profileState.shareCode;
+  if (!code) return;
+  copyGroupUrlToClipboard(code);
+  showToast(`Codice calendario ${code} copiato! 📋`);
+}
+
+function shareMyCalendarLink() {
+  const code = profileState.shareCode;
+  if (!code) {
+    showToast('Codice calendario non disponibile');
+    return;
+  }
+  const url = `${window.location.origin}/?friend=${encodeURIComponent(code)}`;
+  if (navigator.share) {
+    navigator.share({
+      title: 'Calendario UNIMIB - ' + profileState.nickname,
+      text: `Ecco il mio orario lezioni UNIMIB! Aggiungimi al tuo Calendario Amici: ${url}`,
+      url: url
+    }).catch(err => {
+      if (err.name !== 'AbortError') copyGroupUrlToClipboard(url);
+    });
+  } else {
+    copyGroupUrlToClipboard(url);
   }
 }
 
 async function syncProfileNow() {
-  if (!profileState.id) return;
+  if (!profileState.nickname || !profileState.shareCode) return;
 
   const btn  = document.getElementById('btnSyncNow');
   const text = document.getElementById('profileSyncText');
@@ -2245,15 +2279,13 @@ async function syncProfileNow() {
 
   try {
     if (profileState._pin) {
-      // Full sync: push current config to server
       await _syncConfigToProfile();
       text.textContent = `Sincronizzato alle ${new Date().toLocaleTimeString('it-IT')}`;
       showToast('Profilo sincronizzato ✅');
     } else {
-      // No PIN in session: just verify the profile is reachable
-      const resp = await fetch(`/api/profile?id=${profileState.id}`);
+      const resp = await fetch(`/api/profile?code=${encodeURIComponent(profileState.shareCode)}`);
       if (resp.ok) {
-        text.textContent = `Raggiungibile (riaccedi per sincronizzare i dati)`;
+        text.textContent = 'Raggiungibile (riaccedi col PIN per sincronizzare)';
         showToast('Profilo raggiungibile ✅');
       } else {
         text.textContent = 'Profilo non trovato sul server';
@@ -2268,16 +2300,13 @@ async function syncProfileNow() {
   }
 }
 
-/**
- * Background sync: push current config + exam courses to the cloud profile.
- * Requires profileState._pin to be set (session memory only).
- */
 async function _syncConfigToProfile() {
-  if (!profileState.id || !profileState._pin) return;
-  const resp = await fetch(`/api/profile?id=${profileState.id}`, {
+  if (!profileState.nickname || !profileState._pin) return;
+  const resp = await fetch('/api/profile', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      nickname:     profileState.nickname,
       pin:          profileState._pin,
       config:       state.config || null,
       exam_courses: examsState.extraCourses || []
@@ -2311,128 +2340,138 @@ function saveFriends(friends) {
 
 function openAddFriendModal() {
   const modal = document.getElementById('addFriendModal');
+  if (!modal) return;
   modal.classList.add('active');
-  // Reset state
-  showFriendTab('code');
-  document.getElementById('friendCodeInput').value = '';
-  document.getElementById('friendCodePreview').style.display  = 'none';
-  document.getElementById('friendCodeError').style.display    = 'none';
-  document.getElementById('btnConfirmAddFriendCode').disabled = true;
-  document.getElementById('friendNameInput').value = '';
-  document.getElementById('friendNameResults').style.display  = 'none';
-  document.getElementById('friendNameResults').innerHTML      = '';
+  const input = document.getElementById('friendCodeInput');
+  if (input) {
+    input.value = '';
+    setTimeout(() => input.focus(), 50);
+  }
+  const prev = document.getElementById('friendCodePreview');
+  if (prev) prev.style.display = 'none';
+  const err = document.getElementById('friendCodeError');
+  if (err) err.style.display = 'none';
+  const confBtn = document.getElementById('btnConfirmAddFriendCode');
+  if (confBtn) {
+    confBtn.disabled = true;
+    confBtn._foundProfile = null;
+  }
 }
 
 function showFriendTab(tab) {
-  document.getElementById('friendByCode').style.display = tab === 'code' ? '' : 'none';
-  document.getElementById('friendByName').style.display = tab === 'name' ? '' : 'none';
-  document.getElementById('friendTabCode').classList.toggle('active', tab === 'code');
-  document.getElementById('friendTabName').classList.toggle('active', tab === 'name');
+  const byCode = document.getElementById('friendByCode');
+  const byName = document.getElementById('friendByName');
+  const tabCode = document.getElementById('friendTabCode');
+  const tabName = document.getElementById('friendTabName');
+  if (byCode) byCode.style.display = tab === 'code' ? '' : 'none';
+  if (byName) byName.style.display = tab === 'name' ? '' : 'none';
+  if (tabCode) tabCode.classList.toggle('active', tab === 'code');
+  if (tabName) tabName.classList.toggle('active', tab === 'name');
 }
 
 async function lookupFriendByCode() {
-  const id     = document.getElementById('friendCodeInput').value.trim().toLowerCase();
-  const errEl  = document.getElementById('friendCodeError');
-  const prev   = document.getElementById('friendCodePreview');
+  const input   = document.getElementById('friendCodeInput');
+  const code    = (input ? input.value : '').trim().toUpperCase();
+  const errEl   = document.getElementById('friendCodeError');
+  const prev    = document.getElementById('friendCodePreview');
   const confBtn = document.getElementById('btnConfirmAddFriendCode');
 
-  errEl.style.display = 'none';
-  prev.style.display  = 'none';
-  confBtn.disabled    = true;
-  confBtn._foundProfile = null;
+  if (errEl) errEl.style.display = 'none';
+  if (prev) prev.style.display   = 'none';
+  if (confBtn) {
+    confBtn.disabled = true;
+    confBtn._foundProfile = null;
+  }
 
-  if (id.length < 3) {
-    errEl.textContent   = 'Inserisci il codice del tuo amico (es. mario1234).';
-    errEl.style.display = '';
+  if (code.length < 3) {
+    if (errEl) {
+      errEl.textContent   = 'Inserisci il codice calendario del tuo amico (es. K9X2P4).';
+      errEl.style.display = '';
+    }
     return;
   }
+
+  // Check not self
+  if (profileState.shareCode && code === profileState.shareCode.toUpperCase()) {
+    if (errEl) {
+      errEl.textContent   = 'Questo è il tuo codice calendario!';
+      errEl.style.display = '';
+    }
+    return;
+  }
+
   // Check not already added
-  if (friendsState.friends.some(f => f.id === id)) {
-    errEl.textContent   = 'Questo amico è già nel tuo calendario.';
-    errEl.style.display = '';
+  if (friendsState.friends.some(f => (f.id || '').toUpperCase() === code || (f.share_code || '').toUpperCase() === code)) {
+    if (errEl) {
+      errEl.textContent   = 'Questo amico è già nel tuo calendario.';
+      errEl.style.display = '';
+    }
     return;
   }
 
   const btn = document.getElementById('btnLookupFriendCode');
-  btn.disabled = true;
-  btn.textContent = 'Ricerca...';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Ricerca in corso...';
+  }
 
   try {
-    const resp = await fetch(`/api/profile?id=${id}`);
+    let resp = await fetch(`/api/profile?code=${encodeURIComponent(code)}`);
+    if (!resp.ok) {
+      resp = await fetch(`/api/profile?id=${encodeURIComponent(code)}`);
+    }
     const data = await resp.json();
     if (!resp.ok) {
-      errEl.textContent   = 'Codice non trovato. Verifica e riprova.';
-      errEl.style.display = '';
+      if (errEl) {
+        errEl.textContent   = data.error || 'Codice non trovato. Verifica il codice e riprova.';
+        errEl.style.display = '';
+      }
       return;
     }
-    document.getElementById('friendCodePreviewNick').textContent = data.nickname || id;
-    prev.style.display      = '';
-    confBtn.disabled        = false;
-    confBtn._foundProfile   = data;
+    const friendCode = data.share_code || data.id || code;
+    const nickname   = data.nickname || friendCode;
+    const nickEl = document.getElementById('friendCodePreviewNick');
+    if (nickEl) nickEl.textContent = nickname;
+    if (prev) prev.style.display = '';
+    if (confBtn) {
+      confBtn.disabled      = false;
+      confBtn._foundProfile = { id: friendCode, nickname: nickname };
+    }
   } catch (e) {
-    errEl.textContent   = 'Errore di connessione.';
-    errEl.style.display = '';
+    if (errEl) {
+      errEl.textContent   = 'Errore di connessione.';
+      errEl.style.display = '';
+    }
   } finally {
-    btn.disabled    = false;
-    btn.textContent = '🔍 Cerca';
+    if (btn) {
+      btn.disabled    = false;
+      btn.textContent = '🔍 Verifica codice';
+    }
   }
 }
 
 function confirmAddFriendByCode() {
   const btn     = document.getElementById('btnConfirmAddFriendCode');
-  const profile = btn._foundProfile;
+  const profile = btn ? btn._foundProfile : null;
   if (!profile) return;
 
   _addFriend({ id: profile.id, nickname: profile.nickname });
-  document.getElementById('addFriendModal').classList.remove('active');
+  const modal = document.getElementById('addFriendModal');
+  if (modal) modal.classList.remove('active');
 }
 
 async function searchFriendByName() {
-  const nickname = document.getElementById('friendNameInput').value.trim();
-  const resultsEl = document.getElementById('friendNameResults');
-
-  if (!nickname) return;
-
-  const btn = document.getElementById('btnSearchFriendName');
-  btn.disabled = true;
-  btn.textContent = 'Ricerca...';
-  resultsEl.style.display = '';
-  resultsEl.innerHTML = '<p style="color:var(--text-muted); font-size:0.8rem;">Ricerca in corso...</p>';
-
-  try {
-    const resp = await fetch(`/api/profile?lookup=${encodeURIComponent(nickname)}`);
-    const data = await resp.json();
-    const results = data.results || [];
-
-    if (!results.length) {
-      resultsEl.innerHTML = '<p style="color:var(--text-secondary); font-size:0.8rem;">Nessun profilo trovato con questo soprannome.</p>';
-      return;
-    }
-
-    resultsEl.innerHTML = results.map(r => `
-      <div class="friend-result-item" onclick="addFriendFromSearch('${escapeHtml(r.id)}','${escapeHtml(r.nickname)}')">
-        <div class="friend-result-info">
-          <span class="friend-result-nick">${escapeHtml(r.nickname)}</span>
-          <span class="friend-result-id">${escapeHtml(r.id)}</span>
-        </div>
-        <button class="btn-primary" style="width:auto; padding:5px 10px; font-size:0.75rem;" onclick="event.stopPropagation(); addFriendFromSearch('${escapeHtml(r.id)}','${escapeHtml(r.nickname)}')">+ Aggiungi</button>
-      </div>
-    `).join('');
-  } catch (e) {
-    resultsEl.innerHTML = '<p style="color:#EF4444; font-size:0.8rem;">Errore di connessione.</p>';
-  } finally {
-    btn.disabled    = false;
-    btn.textContent = '🔍 Cerca';
-  }
+  // Retained for backward compatibility
 }
 
 function addFriendFromSearch(id, nickname) {
-  if (friendsState.friends.some(f => f.id === id)) {
+  if (friendsState.friends.some(f => (f.id || '').toUpperCase() === id.toUpperCase())) {
     showToast('Questo amico è già nel calendario');
     return;
   }
   _addFriend({ id, nickname });
-  document.getElementById('addFriendModal').classList.remove('active');
+  const modal = document.getElementById('addFriendModal');
+  if (modal) modal.classList.remove('active');
 }
 
 function _addFriend({ id, nickname }) {
@@ -2504,7 +2543,8 @@ async function loadFriendsCalendar() {
     friendsState.events  = resp.events || [];
     // Update friend colors from server response (in case order changed)
     (resp.profiles || []).forEach(p => {
-      const local = friendsState.friends.find(f => f.id === p.id);
+      const pId = (p.share_code || p.id || '').toUpperCase();
+      const local = friendsState.friends.find(f => (f.id || '').toUpperCase() === pId);
       if (local) local.color = p.color;
     });
     saveFriends(friendsState.friends);
@@ -2659,33 +2699,79 @@ function handleOnboardingGuest() {
 
 
 // ══════════════════════════════════════════════════════════════
-//  SHARED GROUP LINK (Import & Share URL)
+//  SHARED CALENDAR & FRIEND LINKS
 // ══════════════════════════════════════════════════════════════
 
-async function handleSharedGroupUrl(groupStr) {
-  const ids = groupStr.split(',')
-    .map(i => i.trim().toLowerCase())
-    .filter(i => /^[a-z0-9_-]{3,40}$/.test(i));
+async function handleFriendShareUrl(friendCode) {
+  const code = (friendCode || '').trim().toUpperCase();
+  if (!code) return;
 
-  if (!ids.length) return;
+  showToast('Caricamento calendario amico... 👥');
+
+  try {
+    let resp = await fetch(`/api/profile?code=${encodeURIComponent(code)}`);
+    if (!resp.ok) {
+      resp = await fetch(`/api/profile?id=${encodeURIComponent(code)}`);
+    }
+    const data = await resp.json();
+    if (!resp.ok) {
+      showToast('Codice calendario amico non valido o non trovato ❌');
+      return;
+    }
+
+    const friendId = data.share_code || data.id || code;
+    const nickname = data.nickname || friendId;
+
+    if (profileState.shareCode && friendId.toUpperCase() === profileState.shareCode.toUpperCase()) {
+      showToast('Questo è il tuo link calendario!');
+    } else if (friendsState.friends.some(f => (f.id || '').toUpperCase() === friendId.toUpperCase())) {
+      showToast(`${nickname} è già nel tuo calendario amici`);
+    } else {
+      _addFriend({ id: friendId, nickname: nickname });
+    }
+
+    switchTab('friends');
+    loadFriendsCalendar();
+  } catch (err) {
+    console.error('Error fetching friend by link:', err);
+    showToast('Errore nel caricamento del link amico');
+  } finally {
+    // Clean URL without reloading page
+    history.replaceState(null, '', window.location.pathname);
+  }
+}
+
+async function handleSharedGroupUrl(groupStr) {
+  const codes = groupStr.split(',')
+    .map(i => i.trim().toUpperCase())
+    .filter(i => /^[A-Z0-9_-]{3,40}$/i.test(i));
+
+  if (!codes.length) return;
 
   showToast('Caricamento gruppo amici... 👥');
 
-  for (const id of ids) {
-    if (!friendsState.friends.some(f => f.id === id) && id !== profileState.id) {
+  for (const code of codes) {
+    const isSelf = (profileState.shareCode && code === profileState.shareCode.toUpperCase()) ||
+                   (profileState.nickname && code.toLowerCase() === profileState.nickname.toLowerCase());
+    if (!friendsState.friends.some(f => (f.id || '').toUpperCase() === code) && !isSelf) {
       try {
-        const resp = await fetch(`/api/profile?id=${id}`);
+        let resp = await fetch(`/api/profile?code=${encodeURIComponent(code)}`);
+        if (!resp.ok) {
+          resp = await fetch(`/api/profile?id=${encodeURIComponent(code)}`);
+        }
         if (resp.ok) {
           const profile = await resp.json();
+          const friendId = profile.share_code || profile.id || code;
+          const friendNick = profile.nickname || friendId;
           const colorIndex = friendsState.friends.length % FRIENDS_COLORS.length;
           friendsState.friends.push({
-            id: profile.id,
-            nickname: profile.nickname || id,
+            id: friendId,
+            nickname: friendNick,
             color: FRIENDS_COLORS[colorIndex]
           });
         }
       } catch (err) {
-        console.warn('Error fetching group profile:', id, err);
+        console.warn('Error fetching group profile:', code, err);
       }
     }
   }
@@ -2700,17 +2786,21 @@ async function handleSharedGroupUrl(groupStr) {
 }
 
 function shareFriendsGroup() {
-  if (!friendsState.friends.length && !profileState.id) {
+  if (!friendsState.friends.length && !profileState.shareCode && !profileState.id) {
     showToast('Aggiungi prima degli amici al calendario per condividere il gruppo');
     return;
   }
-  const ids = [];
-  if (profileState.id) ids.push(profileState.id);
+  const codes = [];
+  if (profileState.shareCode) codes.push(profileState.shareCode);
+  else if (profileState.id) codes.push(profileState.id);
   friendsState.friends.forEach(f => {
-    if (!ids.includes(f.id)) ids.push(f.id);
+    const code = f.share_code || f.id;
+    if (code && !codes.some(c => c.toUpperCase() === code.toUpperCase())) {
+      codes.push(code);
+    }
   });
 
-  const url = `${window.location.origin}/?group=${ids.join(',')}`;
+  const url = `${window.location.origin}/?group=${codes.join(',')}`;
 
   if (navigator.share) {
     navigator.share({
@@ -2728,12 +2818,12 @@ function shareFriendsGroup() {
 function copyGroupUrlToClipboard(url) {
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(url).then(() => {
-      showToast('Link gruppo copiato negli appunti! 📋');
+      showToast('Link copiato negli appunti! 📋');
     }).catch(() => {
       prompt('Copia questo link da inviare ai tuoi amici:', url);
     });
   } else {
     legacyCopy(url);
-    showToast('Link gruppo copiato! 📋');
+    showToast('Link copiato! 📋');
   }
 }

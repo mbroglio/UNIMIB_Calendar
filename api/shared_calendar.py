@@ -166,12 +166,12 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        qs   = self._qs()
-        ids  = [i.strip().lower() for i in qs.get("ids", "").split(",") if i.strip()][:MAX_PROFILES]
-        date = qs.get("date", "").strip()  # DD-MM-YYYY
+        qs    = self._qs()
+        codes = [i.strip().lower() for i in (qs.get("codes", "") or qs.get("ids", "")).split(",") if i.strip()][:MAX_PROFILES]
+        date  = qs.get("date", "").strip()  # DD-MM-YYYY
 
-        if not ids:
-            return self._send_json(400, {"error": "ids parameter required"})
+        if not codes:
+            return self._send_json(400, {"error": "codes parameter required"})
 
         # Normalise date to the Monday of the requested week
         if not date:
@@ -181,23 +181,31 @@ class handler(BaseHTTPRequestHandler):
         profiles_out = []
         all_events   = []
 
-        for idx, pid in enumerate(ids):
+        for idx, code in enumerate(codes):
             try:
-                profile = _redis_get(f"profile:{pid}")
+                # 1) Try public share entry
+                profile = _redis_get(f"share:{code}")
+                # 2) Try account entry
+                if not profile:
+                    profile = _redis_get(f"account:{code}")
+                # 3) Legacy profile entry
+                if not profile:
+                    profile = _redis_get(f"profile:{code}")
             except Exception:
                 continue
             if not profile:
                 continue
 
             color    = SHARED_COLORS[idx % len(SHARED_COLORS)]
-            nickname = profile.get("nickname", pid)
+            share_id = profile.get("share_code", code.upper())
+            nickname = profile.get("nickname", share_id)
             cfg      = profile.get("config") or {}
 
-            profiles_out.append({"id": pid, "nickname": nickname, "color": color})
+            profiles_out.append({"id": share_id, "share_code": share_id, "nickname": nickname, "color": color})
 
             events = _fetch_events(cfg, monday)
             for ev in events:
-                ev["profile_id"] = pid
+                ev["profile_id"] = share_id
                 ev["nickname"]   = nickname
                 ev["color"]      = color
             all_events.extend(events)
