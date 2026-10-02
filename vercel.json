@@ -24,6 +24,10 @@
     {
       "source": "/api/shared_calendar",
       "destination": "/api/shared_calendar.py"
+    },
+    {
+      "source": "/api/group",
+      "destination": "/api/group.py"
     }
   ]
 }

@@ -259,8 +259,8 @@
     <div class="control-card">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <div>
-          <h3 style="font-size:1rem; color:var(--text-primary); margin:0 0 2px;">👥 Calendario Amici</h3>
-          <p style="font-size:0.78rem; color:var(--text-secondary); margin:0;">Confronta i vostri orari e trovate i momenti liberi in comune</p>
+          <h3 id="friendsGroupTitle" style="font-size:1rem; color:var(--text-primary); margin:0 0 2px;">👥 Calendario Gruppo</h3>
+          <p id="friendsGroupSubtitle" style="font-size:0.78rem; color:var(--text-secondary); margin:0;">Confronta i vostri orari e trovate i momenti liberi in comune</p>
         </div>
         <div style="display:flex; gap:8px;">
           <button id="btnShareFriendsGroup" class="btn-secondary" style="width:auto; padding:8px 12px; font-size:0.82rem; white-space:nowrap;" title="Condividi link gruppo con amici">🔗 Condividi</button>
@@ -613,17 +613,17 @@
   <div id="addFriendModal" class="modal-overlay">
     <div class="modal-content setup-content" style="max-width:400px;">
       <div class="modal-header">
-        <h3>➕ Aggiungi un amico</h3>
+        <h3>➕ Aggiungi al gruppo</h3>
         <button id="btnCloseAddFriend" class="btn-icon" style="width:30px; height:30px;">✕</button>
       </div>
 
       <div id="friendByCode">
         <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:14px; line-height:1.45;">
-          Inserisci il <strong>Codice Calendario univoco</strong> che ti ha inviato il tuo amico per visualizzare i suoi orari (oppure apri direttamente il suo link di condivisione).
+          Inserisci il <strong>Codice Calendario</strong> di un amico (es. <code>K9X2P4</code>) oppure un <strong>Codice Gruppo</strong> (es. <code>G7K2P9</code>) per sincronizzarvi all'istante.
         </p>
         <div class="form-field">
-          <label for="friendCodeInput">Codice Calendario Univoco</label>
-          <input type="text" id="friendCodeInput" placeholder="es. K9X2P4" maxlength="12"
+          <label for="friendCodeInput">Codice Amico o Codice Gruppo</label>
+          <input type="text" id="friendCodeInput" placeholder="es. K9X2P4 o G7K2P9" maxlength="12"
                  style="width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:1rem; outline:none; text-transform:uppercase; letter-spacing:0.15em; font-family:monospace; text-align:center;">
         </div>
         <div id="friendCodePreview" style="display:none; background:rgba(255,255,255,0.05); border-radius:10px; padding:10px 14px; margin-bottom:10px; text-align:center;">
@@ -632,7 +632,7 @@
         </div>
         <p id="friendCodeError" style="color:#EF4444; font-size:0.8rem; display:none; margin-bottom:8px;"></p>
         <button id="btnLookupFriendCode" class="btn-secondary" style="width:100%; margin-bottom:8px;">🔍 Verifica codice</button>
-        <button id="btnConfirmAddFriendCode" class="btn-primary" style="width:100%;" disabled>+ Aggiungi al calendario</button>
+        <button id="btnConfirmAddFriendCode" class="btn-primary" style="width:100%;" disabled>+ Aggiungi</button>
       </div>
     </div>
   </div>

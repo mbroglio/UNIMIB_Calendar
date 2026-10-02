@@ -66,14 +66,15 @@ Object.defineProperty(profileState, 'id', {
 
 // Friends/shared calendar state
 let friendsState = {
-  friends: [],        // [{id, nickname, color}]
+  friends: [],        // [{id, nickname, color, config}]
   currentMonday: null,
   events: [],
   myEvents: [],       // current user's own events (if profile is set)
   isLoading: false,
   showMyself: true,   // whether to include the current user's own schedule
   viewMode: 'grid',   // 'grid' | 'combined' | 'freeSlots' (defaults to hourly grid)
-  selectedGridDate: null // DD-MM-YYYY selected day for the grid timeline view
+  selectedGridDate: null, // DD-MM-YYYY selected day for the grid timeline view
+  groupInfo: null     // { id: 'G9X2P4', name: 'Gruppo Studio' }
 };
 
 // Options loaded from the UNIMIB dropdown data while the setup modal is open
@@ -102,6 +103,7 @@ function initApp() {
   setupEventListeners();
   updateRoomsDateDisplay();
   registerServiceWorker();
+  syncGroupCloud();
 
   state.currentMonday = formatFormattedDate(getMonday(new Date()));
   state.config = loadConfig();
@@ -959,6 +961,7 @@ async function saveSetup() {
       profileState.lastSync  = Date.now();
       profileState._pin      = setup._pendingProfile.pin;
       saveProfileLocally();
+      syncGroupCloud();
 
       state.config = newConfig;
       saveConfig(state.config);
@@ -1495,12 +1498,7 @@ function isoToDisplayDate(iso) {
   } else if (tabId === 'friends') {
     document.getElementById('headerSubtitle').textContent = 'Calendario condiviso amici';
     renderFriendChips();
-    if ((friendsState.friends.length || (profileState.shareCode && state.config)) &&
-        !friendsState.events.length && !friendsState.myEvents.length) {
-      loadFriendsCalendar();
-    } else {
-      renderFriendsView();
-    }
+    loadFriendsCalendar();
   }
 }
 
@@ -2409,6 +2407,7 @@ async function handleCreateWithExistingConfig() {
     profileState.lastSync  = Date.now();
     profileState._pin      = creds.pin;
     saveProfileLocally();
+    syncGroupCloud();
     renderProfileModal();
     showToast(`🎉 Profilo creato! Il tuo codice calendario è: ${data.share_code}`, 5000);
     setTimeout(() => {
@@ -2513,6 +2512,7 @@ async function handleLoginProfile() {
     profileState.lastSync  = Date.now();
     profileState._pin      = pin;  // session-only, for background auto-sync
     saveProfileLocally();
+    syncGroupCloud();
     renderProfileModal();
     showToast(`Bentornato, ${data.nickname}! 👋`);
     setTimeout(() => {
@@ -2634,6 +2634,84 @@ function saveFriends(friends) {
   } catch (e) { /* ignore */ }
 }
 
+/**
+ * Cloud Group Sync
+ * Keeps local friends list and Redis cloud group in full bidirectional synchronization.
+ * When student A adds student B, both A and B are linked to the same cloud group.
+ */
+async function syncGroupCloud() {
+  if (!profileState.shareCode) return;
+  const myCode = profileState.shareCode.toUpperCase();
+
+  try {
+    const localFriendCodes = friendsState.friends
+      .map(f => f.share_code || f.id)
+      .filter(Boolean)
+      .map(c => c.toUpperCase())
+      .filter(c => c !== myCode);
+
+    let groupData = null;
+
+    if (localFriendCodes.length > 0) {
+      // Sync local friends to cloud group so friends are also joined to me in Redis
+      const resp = await fetch('/api/group', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'sync',
+          user_code: myCode,
+          friend_codes: localFriendCodes
+        })
+      });
+      if (resp.ok) {
+        groupData = await resp.json();
+      }
+    } else {
+      // Fetch cloud group
+      const resp = await fetch(`/api/group?user=${encodeURIComponent(myCode)}`);
+      if (resp.ok) {
+        groupData = await resp.json();
+      }
+    }
+
+    if (groupData && groupData.group && Array.isArray(groupData.members)) {
+      friendsState.groupInfo = groupData.group;
+
+      // Extract all members EXCEPT myself
+      const otherMembers = groupData.members.filter(m => (m.share_code || m.id || '').toUpperCase() !== myCode);
+
+      friendsState.friends = otherMembers.map((m, idx) => ({
+        id:         m.share_code || m.id,
+        share_code: m.share_code || m.id,
+        nickname:   m.nickname || m.id,
+        config:     m.config,
+        color:      m.color || FRIENDS_COLORS[idx % FRIENDS_COLORS.length]
+      }));
+
+      saveFriends(friendsState.friends);
+      renderFriendChips();
+      updateFriendsGroupHeader();
+    }
+  } catch (err) {
+    console.warn('Group cloud sync error:', err);
+  }
+}
+
+function updateFriendsGroupHeader() {
+  const titleEl = document.getElementById('friendsGroupTitle');
+  const subEl   = document.getElementById('friendsGroupSubtitle');
+  if (friendsState.groupInfo) {
+    if (titleEl) titleEl.textContent = `👥 ${friendsState.groupInfo.name || 'Gruppo Studio'}`;
+    const totalCount = friendsState.friends.length + 1;
+    if (subEl) {
+      subEl.innerHTML = `Codice Gruppo: <strong style="color:var(--accent-purple); font-family:monospace; letter-spacing:0.05em;">${escapeHtml(friendsState.groupInfo.id)}</strong> • ${totalCount} ${totalCount === 1 ? 'membro' : 'membri'}`;
+    }
+  } else {
+    if (titleEl) titleEl.textContent = '👥 Calendario Gruppo';
+    if (subEl) subEl.textContent = 'Confronta i vostri orari e trovate i momenti liberi in comune';
+  }
+}
+
 function openAddFriendModal() {
   const modal = document.getElementById('addFriendModal');
   if (!modal) return;
@@ -2650,6 +2728,7 @@ function openAddFriendModal() {
   const confBtn = document.getElementById('btnConfirmAddFriendCode');
   if (confBtn) {
     confBtn.disabled = true;
+    confBtn.textContent = '+ Aggiungi';
     confBtn._foundProfile = null;
   }
 }
@@ -2676,12 +2755,13 @@ async function lookupFriendByCode() {
   if (prev) prev.style.display   = 'none';
   if (confBtn) {
     confBtn.disabled = true;
+    confBtn.textContent = '+ Aggiungi';
     confBtn._foundProfile = null;
   }
 
   if (code.length < 3) {
     if (errEl) {
-      errEl.textContent   = 'Inserisci il codice calendario del tuo amico (es. K9X2P4).';
+      errEl.textContent   = 'Inserisci il codice calendario di un amico (es. K9X2P4) o di un gruppo (es. G7K2P9).';
       errEl.style.display = '';
     }
     return;
@@ -2699,7 +2779,7 @@ async function lookupFriendByCode() {
   // Check not already added
   if (friendsState.friends.some(f => (f.id || '').toUpperCase() === code || (f.share_code || '').toUpperCase() === code)) {
     if (errEl) {
-      errEl.textContent   = 'Questo amico è già nel tuo calendario.';
+      errEl.textContent   = 'Questo amico è già presente nel tuo gruppo.';
       errEl.style.display = '';
     }
     return;
@@ -2712,6 +2792,35 @@ async function lookupFriendByCode() {
   }
 
   try {
+    // 1. Check if it's a Group ID first
+    let isGroup = false;
+    let groupData = null;
+    try {
+      const gResp = await fetch(`/api/group?id=${encodeURIComponent(code)}`);
+      if (gResp.ok) {
+        const gJson = await gResp.json();
+        if (gJson && gJson.group) {
+          isGroup = true;
+          groupData = gJson;
+        }
+      }
+    } catch (ge) {}
+
+    if (isGroup && groupData) {
+      const g = groupData.group;
+      const count = (groupData.members || []).length;
+      const nickEl = document.getElementById('friendCodePreviewNick');
+      if (nickEl) nickEl.textContent = `Gruppo "${g.name}" (${count} ${count === 1 ? 'membro' : 'membri'})`;
+      if (prev) prev.style.display = '';
+      if (confBtn) {
+        confBtn.disabled = false;
+        confBtn.textContent = '🤝 Unisciti al gruppo';
+        confBtn._foundProfile = { isGroup: true, group_id: g.id, group_name: g.name, members: groupData.members };
+      }
+      return;
+    }
+
+    // 2. Otherwise check if it's a Friend Calendar Code
     let resp = await fetch(`/api/profile?code=${encodeURIComponent(code)}`);
     if (!resp.ok) {
       resp = await fetch(`/api/profile?id=${encodeURIComponent(code)}`);
@@ -2727,11 +2836,12 @@ async function lookupFriendByCode() {
     const friendCode = data.share_code || data.id || code;
     const nickname   = data.nickname || friendCode;
     const nickEl = document.getElementById('friendCodePreviewNick');
-    if (nickEl) nickEl.textContent = nickname;
+    if (nickEl) nickEl.textContent = `Amico: ${nickname}`;
     if (prev) prev.style.display = '';
     if (confBtn) {
       confBtn.disabled      = false;
-      confBtn._foundProfile = { id: friendCode, nickname: nickname };
+      confBtn.textContent   = '+ Aggiungi al gruppo';
+      confBtn._foundProfile = { isGroup: false, id: friendCode, nickname: nickname };
     }
   } catch (e) {
     if (errEl) {
@@ -2751,11 +2861,10 @@ function confirmAddFriendByCode() {
   const profile = btn ? btn._foundProfile : null;
   if (!profile) return;
 
-  // Clear the stored profile and disable the button immediately so the
-  // user can't add the same person again without re-verifying a code.
   if (btn) {
     btn._foundProfile = null;
     btn.disabled = true;
+    btn.textContent = '+ Aggiungi';
   }
 
   const input = document.getElementById('friendCodeInput');
@@ -2765,9 +2874,55 @@ function confirmAddFriendByCode() {
   const err = document.getElementById('friendCodeError');
   if (err) err.style.display = 'none';
 
-  _addFriend({ id: profile.id, nickname: profile.nickname });
+  if (!profileState.shareCode) {
+    showToast("Nota: crea o accedi col tuo profilo per permettere al tuo amico di vedere i tuoi orari!", 4500);
+  }
+
+  if (profile.isGroup) {
+    handleJoinGroup(profile);
+  } else {
+    _addFriend({ id: profile.id, nickname: profile.nickname });
+  }
+
   const modal = document.getElementById('addFriendModal');
   if (modal) modal.classList.remove('active');
+}
+
+async function handleJoinGroup(groupProfile) {
+  const myCode = (profileState.shareCode || '').toUpperCase();
+  if (myCode) {
+    try {
+      await fetch('/api/group', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'join_group',
+          user_code: myCode,
+          group_id: groupProfile.group_id
+        })
+      });
+    } catch (e) {
+      console.warn('Error joining group on server:', e);
+    }
+  }
+
+  friendsState.groupInfo = { id: groupProfile.group_id, name: groupProfile.group_name };
+  friendsState.friends = (groupProfile.members || [])
+    .filter(m => (m.share_code || m.id || '').toUpperCase() !== myCode)
+    .map((m, idx) => ({
+      id:         m.share_code || m.id,
+      share_code: m.share_code || m.id,
+      nickname:   m.nickname || m.id,
+      config:     m.config,
+      color:      m.color || FRIENDS_COLORS[idx % FRIENDS_COLORS.length]
+    }));
+
+  saveFriends(friendsState.friends);
+  renderFriendChips();
+  updateFriendsGroupHeader();
+  friendsState.events = [];
+  loadFriendsCalendar();
+  showToast(`Ti sei unito al gruppo "${groupProfile.group_name}"! 🎉`);
 }
 
 async function searchFriendByName() {
@@ -2776,7 +2931,7 @@ async function searchFriendByName() {
 
 function addFriendFromSearch(id, nickname) {
   if (friendsState.friends.some(f => (f.id || '').toUpperCase() === id.toUpperCase())) {
-    showToast('Questo amico è già nel calendario');
+    showToast('Questo amico è già nel gruppo');
     return;
   }
   _addFriend({ id, nickname });
@@ -2784,9 +2939,9 @@ function addFriendFromSearch(id, nickname) {
   if (modal) modal.classList.remove('active');
 }
 
-function _addFriend({ id, nickname }) {
+async function _addFriend({ id, nickname }) {
   if (friendsState.friends.some(f => (f.id || '').toUpperCase() === (id || '').toUpperCase())) {
-    showToast(`${nickname} è già nel tuo calendario`);
+    showToast(`${nickname} è già nel gruppo`);
     return;
   }
   const colorIndex = friendsState.friends.length % FRIENDS_COLORS.length;
@@ -2796,7 +2951,32 @@ function _addFriend({ id, nickname }) {
   // Clear cached events so next view forces a reload
   friendsState.events = [];
   renderFriendChips();
-  showToast(`${nickname} aggiunto al calendario! 🎉`);
+  showToast(`${nickname} aggiunto al gruppo! 🎉`);
+
+  // Cloud sync to join friend to group in Redis
+  if (profileState.shareCode) {
+    try {
+      const resp = await fetch('/api/group', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'add_member',
+          user_code: profileState.shareCode.toUpperCase(),
+          friend_code: id.toUpperCase()
+        })
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data && data.group) {
+          friendsState.groupInfo = data.group;
+          updateFriendsGroupHeader();
+        }
+      }
+    } catch (err) {
+      console.warn('Cloud group add member error:', err);
+    }
+  }
+
   // If we're already on the friends tab, reload
   if (state.activeTab === 'friends') {
     loadFriendsCalendar();
@@ -2806,12 +2986,33 @@ function _addFriend({ id, nickname }) {
 function removeFriend(id) {
   friendsState.friends = friendsState.friends.filter(f => f.id !== id);
   saveFriends(friendsState.friends);
-  // Reassign colors to maintain consistency
   friendsState.friends.forEach((f, i) => { f.color = FRIENDS_COLORS[i % FRIENDS_COLORS.length]; });
   saveFriends(friendsState.friends);
-  friendsState.events  = [];
+  friendsState.events   = [];
   friendsState.myEvents = [];
   renderFriendChips();
+
+  // Cloud sync to remove friend from group in Redis
+  if (profileState.shareCode) {
+    fetch('/api/group', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'remove_member',
+        user_code: profileState.shareCode.toUpperCase(),
+        remove_code: id.toUpperCase()
+      })
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data && data.group) {
+        friendsState.groupInfo = data.group;
+        updateFriendsGroupHeader();
+      }
+    })
+    .catch(err => console.warn('Cloud group remove member error:', err));
+  }
+
   // If any members remain (friends or self), reload the calendar; otherwise just re-render
   const hasFriends = friendsState.friends.length > 0;
   const hasMyself  = friendsState.showMyself && profileState.shareCode && state.config;
@@ -2820,12 +3021,15 @@ function removeFriend(id) {
   } else {
     renderFriendsView();
   }
-  showToast('Amico rimosso dal calendario');
+  showToast('Membro rimosso dal gruppo');
 }
 
 function renderFriendChips() {
   const container = document.getElementById('friendChips');
   if (!container) return;
+
+  // Update group header
+  updateFriendsGroupHeader();
 
   // Show/hide "Include me" row based on whether the user has a profile + config
   const myselfRow = document.getElementById('friendsMyselfRow');
@@ -2847,15 +3051,22 @@ function renderFriendChips() {
   if (btnViewGrid)      btnViewGrid.classList.toggle('active', friendsState.viewMode === 'grid');
   if (btnViewFreeSlots) btnViewFreeSlots.classList.toggle('active', friendsState.viewMode === 'freeSlots');
 
+  const notLoggedInBanner = !profileState.shareCode
+    ? `<div style="background:rgba(139,92,246,0.12); border:1px solid rgba(139,92,246,0.3); border-radius:10px; padding:8px 12px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+        <span style="font-size:0.78rem; color:var(--text-secondary);">👤 <strong style="color:#FFF;">Non hai ancora effettuato l'accesso?</strong> Accedi col tuo profilo per salvare il gruppo nel cloud e sincronizzarti all'istante con gli amici.</span>
+        <button onclick="openProfileModal()" class="btn-primary" style="width:auto; padding:5px 12px; font-size:0.75rem; white-space:nowrap;">Accedi</button>
+      </div>`
+    : '';
+
   if (!friendsState.friends.length) {
-    container.innerHTML = '<span style="color:var(--text-muted); font-size:0.8rem; line-height:32px;">Nessun amico aggiunto — usa il pulsante + per iniziare</span>';
+    container.innerHTML = notLoggedInBanner + '<span style="color:var(--text-muted); font-size:0.8rem; line-height:32px;">Nessun amico nel gruppo — usa il pulsante + per aggiungere un amico o unirti a un gruppo</span>';
     return;
   }
-  container.innerHTML = friendsState.friends.map(f => `
+  container.innerHTML = notLoggedInBanner + friendsState.friends.map(f => `
     <span class="friend-chip" style="background: ${hexToRgba(f.color, 0.18)}; border-color: ${hexToRgba(f.color, 0.4)};">
       <span class="friend-chip-dot" style="background:${f.color};"></span>
       <span style="overflow:hidden; text-overflow:ellipsis;">${escapeHtml(f.nickname)}</span>
-      <button class="friend-chip-remove" onclick="removeFriend('${escapeHtml(f.id)}')" title="Rimuovi">✕</button>
+      <button class="friend-chip-remove" onclick="removeFriend('${escapeHtml(f.id)}')" title="Rimuovi dal gruppo">✕</button>
     </span>
   `).join('');
 }
@@ -2868,33 +3079,38 @@ function hexToRgba(hex, alpha) {
 }
 
 async function loadFriendsCalendar() {
-  const hasFriends = friendsState.friends.length > 0;
-  const hasMyself  = friendsState.showMyself && profileState.shareCode && state.config;
-
-  if (!hasFriends && !hasMyself) {
-    renderFriendsView();
-    return;
-  }
-
   friendsState.isLoading = true;
   friendsState.myEvents  = [];
   renderFriendsView(); // shows spinner
 
+  // If logged in, perform cloud sync first so any members added by friends in the cloud are loaded
+  if (profileState.shareCode) {
+    await syncGroupCloud();
+  }
+
+  const hasFriends = friendsState.friends.length > 0;
+  const hasMyself  = friendsState.showMyself && profileState.shareCode && state.config;
+
+  if (!hasFriends && !hasMyself) {
+    friendsState.isLoading = false;
+    renderFriendsView();
+    return;
+  }
+
   const date = friendsState.currentMonday
-    ? friendsState.currentMonday.split('-').join('-')  // already DD-MM-YYYY
+    ? friendsState.currentMonday.split('-').join('-')
     : formatFormattedDate(getMonday(new Date()));
 
   // ── 1. Fetch friends' events from shared_calendar API ─────────────────────
-  if (hasFriends) {
+  if (friendsState.friends.length > 0) {
     try {
-      const ids  = friendsState.friends.map(f => f.id).join(',');
+      const ids  = friendsState.friends.map(f => f.share_code || f.id).join(',');
       const resp = await fetchJson(`/api/shared_calendar?ids=${encodeURIComponent(ids)}&date=${encodeURIComponent(date)}`);
       friendsState.events  = resp.events || [];
-      // Update friend colors from server response (in case order changed)
       (resp.profiles || []).forEach(p => {
         const pId = (p.share_code || p.id || '').toUpperCase();
-        const local = friendsState.friends.find(f => (f.id || '').toUpperCase() === pId);
-        if (local) local.color = p.color;
+        const local = friendsState.friends.find(f => (f.id || '').toUpperCase() === pId || (f.share_code || '').toUpperCase() === pId);
+        if (local && p.color) local.color = p.color;
       });
       saveFriends(friendsState.friends);
     } catch (e) {
@@ -2906,24 +3122,21 @@ async function loadFriendsCalendar() {
   }
 
   // ── 2. Fetch own events from calendar API (if logged in + config set) ──────
-  if (hasMyself) {
+  if (friendsState.showMyself && profileState.shareCode && state.config) {
     try {
       const cfg = state.config;
-      // Convert DD-MM-YYYY → usable date param
       const calUrl = `/api/calendar?anno=${encodeURIComponent(cfg.anno)}&corso=${encodeURIComponent(cfg.corso)}&date=${encodeURIComponent(date)}` +
                      cfg.anni.map(a => `&anno2=${encodeURIComponent(a)}`).join('');
       const calData = await fetchJson(calUrl);
       let myEvs = calData.events || [];
-      // Filter to favourites only (same logic as the shared_calendar backend)
       const favCodes = new Set((cfg.favorites || []).map(f => (f.code || '').toUpperCase()).filter(Boolean));
       if (favCodes.size > 0) {
         myEvs = myEvs.filter(e => favCodes.has((e.course_code || '').toUpperCase()));
       }
-      // Attach "MY_SELF" profile metadata so the renderer can distinguish me
       myEvs.forEach(ev => {
         ev.profile_id = 'MY_SELF';
         ev.nickname   = profileState.nickname || 'Io';
-        ev.color      = '#2DD4BF'; // teal – distinct from friends palette
+        ev.color      = '#2DD4BF';
       });
       friendsState.myEvents = myEvs;
     } catch (e) {
@@ -3648,11 +3861,8 @@ async function handleFriendShareUrl(friendCode) {
 }
 
 async function handleSharedGroupUrl(groupStr) {
-  const codes = groupStr.split(',')
-    .map(i => i.trim().toUpperCase())
-    .filter(i => /^[A-Z0-9_-]{3,40}$/i.test(i));
-
-  if (!codes.length) return;
+  const clean = (groupStr || '').trim();
+  if (!clean) return;
 
   // Switch to friends tab immediately so the user sees the loading state there
   switchTab('friends');
@@ -3661,56 +3871,102 @@ async function handleSharedGroupUrl(groupStr) {
   friendsState.myEvents  = [];
   renderFriendsView();
 
-  // Fetch all group member profiles in parallel for speed
-  const fetchPromises = codes.map(async code => {
-    const isSelf = (profileState.shareCode && code === profileState.shareCode.toUpperCase()) ||
-                   (profileState.nickname && code.toLowerCase() === profileState.nickname.toLowerCase());
-    if (friendsState.friends.some(f => (f.id || '').toUpperCase() === code) || isSelf) return;
-    try {
-      let resp = await fetch(`/api/profile?code=${encodeURIComponent(code)}`);
-      if (!resp.ok) {
-        resp = await fetch(`/api/profile?id=${encodeURIComponent(code)}`);
-      }
-      if (resp.ok) {
-        const profile = await resp.json();
-        const friendId   = profile.share_code || profile.id || code;
-        const friendNick = profile.nickname || friendId;
-        // Only add if not already present
-        if (!friendsState.friends.some(f => (f.id || '').toUpperCase() === friendId.toUpperCase())) {
-          const colorIndex = friendsState.friends.length % FRIENDS_COLORS.length;
-          friendsState.friends.push({
-            id: friendId,
-            nickname: friendNick,
-            color: FRIENDS_COLORS[colorIndex]
-          });
+  try {
+    // 1. Check if it's a Cloud Group Code (e.g. ?group=G9X2P4 or single group code)
+    if (!clean.includes(',')) {
+      try {
+        const gResp = await fetch(`/api/group?id=${encodeURIComponent(clean.toUpperCase())}`);
+        if (gResp.ok) {
+          const groupData = await gResp.json();
+          if (groupData && groupData.group) {
+            await handleJoinGroup({
+              group_id:   groupData.group.id,
+              group_name: groupData.group.name,
+              members:    groupData.members
+            });
+            return;
+          }
         }
-      }
-    } catch (err) {
-      console.warn('Error fetching group profile:', code, err);
+      } catch (ge) {}
     }
-  });
 
-  await Promise.all(fetchPromises);
+    // 2. Otherwise treat as comma-separated friend codes
+    const codes = clean.split(',')
+      .map(i => i.trim().toUpperCase())
+      .filter(i => /^[A-Z0-9_-]{3,40}$/i.test(i));
 
-  saveFriends(friendsState.friends);
-  renderFriendChips();
-  // Clean URL without reloading page
-  history.replaceState(null, '', window.location.pathname);
+    if (!codes.length) return;
 
-  friendsState.isLoading = false;
-  // loadFriendsCalendar will set isLoading=true and fetch everything properly
-  loadFriendsCalendar();
-  showToast('Gruppo amici caricato nel calendario! 🎉');
+    // Fetch all group member profiles in parallel for speed
+    const fetchPromises = codes.map(async code => {
+      const isSelf = (profileState.shareCode && code === profileState.shareCode.toUpperCase()) ||
+                     (profileState.nickname && code.toLowerCase() === profileState.nickname.toLowerCase());
+      if (friendsState.friends.some(f => (f.id || '').toUpperCase() === code) || isSelf) return;
+      try {
+        let resp = await fetch(`/api/profile?code=${encodeURIComponent(code)}`);
+        if (!resp.ok) {
+          resp = await fetch(`/api/profile?id=${encodeURIComponent(code)}`);
+        }
+        if (resp.ok) {
+          const profile = await resp.json();
+          const friendId   = profile.share_code || profile.id || code;
+          const friendNick = profile.nickname || friendId;
+          if (!friendsState.friends.some(f => (f.id || '').toUpperCase() === friendId.toUpperCase())) {
+            const colorIndex = friendsState.friends.length % FRIENDS_COLORS.length;
+            friendsState.friends.push({
+              id: friendId,
+              nickname: friendNick,
+              color: FRIENDS_COLORS[colorIndex]
+            });
+          }
+        }
+      } catch (err) {
+        console.warn('Error fetching group profile:', code, err);
+      }
+    });
+
+    await Promise.all(fetchPromises);
+
+    saveFriends(friendsState.friends);
+    renderFriendChips();
+
+    // If logged in, sync friends to cloud group in Redis
+    if (profileState.shareCode) {
+      await syncGroupCloud();
+    }
+
+    friendsState.isLoading = false;
+    loadFriendsCalendar();
+    showToast('Gruppo amici caricato nel calendario! 🎉');
+  } finally {
+    // Clean URL without reloading page
+    history.replaceState(null, '', window.location.pathname);
+  }
 }
 
 function shareFriendsGroup() {
-  if (!friendsState.friends.length && !profileState.shareCode && !profileState.id) {
+  if (friendsState.groupInfo && friendsState.groupInfo.id) {
+    const url = `${window.location.origin}/?group=${encodeURIComponent(friendsState.groupInfo.id)}`;
+    if (navigator.share) {
+      navigator.share({
+        title: `Gruppo ${friendsState.groupInfo.name || 'Amici'} UNIMIB`,
+        text: `Unisciti al gruppo "${friendsState.groupInfo.name || 'Amici'}" sul calendario UNIMIB! Codice gruppo: ${friendsState.groupInfo.id}`,
+        url: url
+      }).catch(err => {
+        if (err.name !== 'AbortError') copyGroupUrlToClipboard(url);
+      });
+    } else {
+      copyGroupUrlToClipboard(url);
+    }
+    return;
+  }
+
+  if (!friendsState.friends.length && !profileState.shareCode) {
     showToast('Aggiungi prima degli amici al calendario per condividere il gruppo');
     return;
   }
   const codes = [];
   if (profileState.shareCode) codes.push(profileState.shareCode);
-  else if (profileState.id) codes.push(profileState.id);
   friendsState.friends.forEach(f => {
     const code = f.share_code || f.id;
     if (code && !codes.some(c => c.toUpperCase() === code.toUpperCase())) {
@@ -3745,3 +4001,10 @@ function copyGroupUrlToClipboard(url) {
     showToast('Link copiato! 📋');
   }
 }
+
+// Auto-sync friends group when tab becomes visible
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.activeTab === 'friends' && !friendsState.isLoading) {
+    loadFriendsCalendar();
+  }
+});

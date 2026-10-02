@@ -39,16 +39,17 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 - **⚡ First-Visit Onboarding**: First-time visitors can choose to create a profile, log in to restore an existing plan, or **Continua come ospite** (Guest mode) to start immediately without registration.
 - **☁️ Serverless Storage**: Backed by **Upstash Redis REST API**, salted with SHA-256 for secure PIN verification.
 
-### 5. 👥 Friends Shared Calendar (Calendario Amici)
+### 5. 👥 Friends Shared Calendar & Synchronized Groups (Gruppi & Calendario Condiviso)
 - **🔒 Privacy First (Zero Leaked Credentials)**: Your personal PIN remains strictly private and is only used to log in on your own devices. The system generates an independent, unique 6-character **Codice Calendario Univoco** (e.g. `K9X2P4`) using unambiguous characters (no `0`, `O`, `1`, `I`).
-- **🔗 Instant Link or Code Sharing**: Add friends by entering their 6-character calendar code, or send them a direct link (e.g. `/?friend=K9X2P4`) which automatically opens the friends tab and adds them to the calendar with a single tap.
+- **🤝 Bidirectional Cloud Group Sync**: When you add a friend via their calendar code (or invite them to a group), **both students are automatically linked to the same cloud group in Redis**. The friend automatically sees your timetable and group members on their own device without needing to manually re-enter your code.
+- **🏷️ Unique Group Codes & Links**: Groups receive a persistent group code (e.g. `G7K2P9`) and shareable link (e.g. `/?group=G7K2P9`). Anyone opening the link or entering the code is instantly added to the group for everyone.
 - **⭐ Favorites-Only Sharing**: When viewing a friend's schedule, only the subjects they have personally selected (⭐ I miei corsi) are shown — not their entire degree programme. If no favorites are set, all courses are shown as a fallback.
 - **👤 Include Yourself**: Toggle **"👤 Includi me"** to overlay your own schedule (filtered to your selected subjects) alongside your friends' timetables, shown in teal with a distinct "Io 👤" badge.
 - **🏷️ Merged Shared Courses**: When multiple students in the group attend the same course at the same time, it is displayed as a single consolidated card displaying badges for all attendees (e.g. `[Io 👤] [Mario] [Luca]`), eliminating duplicate cards.
 - **📅 Chronological List View**: Toggle **"📋 Elenco"** to browse all group lectures ordered day-by-day and time-by-time.
 - **📊 Daily Timeline Grid (08:30 – 18:30)**: Toggle **"📊 Vista Oraria"** to see a vertical time grid for any day of the week. Courses fill their vertical time slots, and different courses overlapping in the same hours are automatically packed side-by-side in parallel lanes with a live indicator for the current time.
 - **🟢 Free Slots View (up to 18:30)**: Switch to **"🟢 Slot liberi"** to calculate time windows (≥ 30 min) between 08:30 and 18:30 when **everyone** in the group has no lectures — perfect for finding study breaks, project meetings, or lunch times.
-- **👥 One-Tap Group Links**: Click **🔗 Condividi** to generate a link (e.g. `/?group=K9X2P4,W3M7R2`) so an entire study group can load all friends at once. All profiles in the group are fetched in parallel for speed.
+- **⚡ Background Auto-Sync**: The friends group automatically re-synchronizes when the tab becomes active or visible (`visibilitychange`).
 
 ### 6. 📱 iOS & Mobile Optimizations
 - **Safe Area Inset Support**: Fully accounts for iPhone notch, Dynamic Island, and home indicator bars (`env(safe-area-inset-top)` and `env(safe-area-inset-bottom)`).
@@ -102,7 +103,8 @@ flowchart TD
 │   ├── options.py          # Degree dropdown data (combo.php)
 │   ├── profile.py          # Profile management & PIN authentication (Upstash Redis)
 │   ├── rooms.py            # Live classroom occupancy scraper
-│   └── shared_calendar.py  # Combined multi-student timetable generator
+│   ├── shared_calendar.py  # Combined multi-student timetable generator
+│   └── group.py            # Synchronized cloud study groups & bidirectional friend linking
 ├── public/
 │   ├── css/
 │   │   └── style.css       # Responsive dark-theme & glassmorphism styles
@@ -131,6 +133,8 @@ flowchart TD
 | `PUT` | `/api/profile` | Authenticates / updates account (`{ nickname, pin, config?, exam_courses? }`) and syncs cloud schedule |
 | `GET` | `/api/profile?code=<CODE>` | Fetches friend's public schedule and nickname using their 6-char share code |
 | `GET` | `/api/shared_calendar?codes=C1,C2` | Returns merged weekly timetable for multiple student share codes |
+| `GET` | `/api/group?user=<CODE>` or `?id=<GID>` | Fetches cloud group information and all member profiles |
+| `POST` | `/api/group` | Manages cloud groups: `add_member`, `sync`, `remove_member`, `join_group`, `rename_group` |
 
 ---
 
