@@ -1326,13 +1326,34 @@ function showError(msg) {
   `;
 }
 
-function showToast(msg) {
+let toastTimeout = null;
+
+function showToast(msg, duration = 3000) {
   const toast = document.getElementById('toastNotification');
+  if (!toast) return;
+
+  if (toastTimeout) {
+    clearTimeout(toastTimeout);
+    toastTimeout = null;
+  }
+
   toast.textContent = msg;
   toast.classList.add('show');
-  setTimeout(() => {
+
+  // Allow clicking/tapping the toast to dismiss it immediately
+  toast.onclick = () => {
     toast.classList.remove('show');
-  }, 3000);
+    if (toastTimeout) {
+      clearTimeout(toastTimeout);
+      toastTimeout = null;
+    }
+  };
+
+  const timeoutMs = typeof duration === 'number' && duration > 0 ? duration : 3000;
+  toastTimeout = setTimeout(() => {
+    toast.classList.remove('show');
+    toastTimeout = null;
+  }, timeoutMs);
 }
 
 // Helpers
