@@ -72,7 +72,7 @@ let friendsState = {
   myEvents: [],       // current user's own events (if profile is set)
   isLoading: false,
   showMyself: true,   // whether to include the current user's own schedule
-  viewMode: 'combined', // 'combined' | 'grid' | 'freeSlots'
+  viewMode: 'grid',   // 'grid' | 'combined' | 'freeSlots' (defaults to hourly grid)
   selectedGridDate: null // DD-MM-YYYY selected day for the grid timeline view
 };
 
@@ -310,15 +310,18 @@ function setupEventListeners() {
     loadCalendar(state.currentMonday);
   });
 
-  document.getElementById('btnRefresh').addEventListener('click', () => {
-    if (state.activeTab === 'timetable') {
-      loadCalendar(state.currentMonday, true);
-    } else if (state.activeTab === 'rooms') {
-      loadRoomsOccupancy(true);
-    } else if (state.activeTab === 'exams') {
-      loadExams(true);
-    }
-  });
+  const btnRefresh = document.getElementById('btnRefresh');
+  if (btnRefresh) {
+    btnRefresh.addEventListener('click', () => {
+      if (state.activeTab === 'timetable') {
+        loadCalendar(state.currentMonday, true);
+      } else if (state.activeTab === 'rooms') {
+        loadRoomsOccupancy(true);
+      } else if (state.activeTab === 'exams') {
+        loadExams(true);
+      }
+    });
+  }
 
   // Timetable Search Bar
   const searchInput = document.getElementById('searchInput');
@@ -470,7 +473,10 @@ function setupEventListeners() {
   });
 
   // Share link
-  document.getElementById('btnShare').addEventListener('click', openShare);
+  const btnShare = document.getElementById('btnShare');
+  if (btnShare) {
+    btnShare.addEventListener('click', openShare);
+  }
   document.getElementById('btnCloseShare').addEventListener('click', () => {
     document.getElementById('shareModal').classList.remove('active');
   });
@@ -2832,6 +2838,14 @@ function renderFriendChips() {
     btnToggle.classList.toggle('active', friendsState.showMyself);
     btnToggle.textContent = friendsState.showMyself ? '👤 Includi me' : '👤 Escludi me';
   }
+
+  // Sync view mode buttons
+  const btnViewCombined  = document.getElementById('btnFriendsViewCombined');
+  const btnViewGrid      = document.getElementById('btnFriendsViewGrid');
+  const btnViewFreeSlots = document.getElementById('btnFriendsViewFreeSlots');
+  if (btnViewCombined)  btnViewCombined.classList.toggle('active', friendsState.viewMode === 'combined');
+  if (btnViewGrid)      btnViewGrid.classList.toggle('active', friendsState.viewMode === 'grid');
+  if (btnViewFreeSlots) btnViewFreeSlots.classList.toggle('active', friendsState.viewMode === 'freeSlots');
 
   if (!friendsState.friends.length) {
     container.innerHTML = '<span style="color:var(--text-muted); font-size:0.8rem; line-height:32px;">Nessun amico aggiunto — usa il pulsante + per iniziare</span>';
