@@ -72,7 +72,8 @@ let friendsState = {
   myEvents: [],       // current user's own events (if profile is set)
   isLoading: false,
   showMyself: true,   // whether to include the current user's own schedule
-  viewMode: 'combined' // 'combined' | 'freeSlots'
+  viewMode: 'combined', // 'combined' | 'grid' | 'freeSlots'
+  selectedGridDate: null // DD-MM-YYYY selected day for the grid timeline view
 };
 
 // Options loaded from the UNIMIB dropdown data while the setup modal is open
@@ -244,24 +245,35 @@ function setupEventListeners() {
       renderFriendsView();
     });
   }
-  // Toggle: view mode (combined events / free slots)
+  // Toggle: view mode (combined list / grid / free slots)
   const btnViewCombined = document.getElementById('btnFriendsViewCombined');
+  const btnViewGrid     = document.getElementById('btnFriendsViewGrid');
+  const btnViewFreeSlots = document.getElementById('btnFriendsViewFreeSlots');
+
+  const updateViewModeButtons = (mode) => {
+    if (btnViewCombined) btnViewCombined.classList.toggle('active', mode === 'combined');
+    if (btnViewGrid)     btnViewGrid.classList.toggle('active', mode === 'grid');
+    if (btnViewFreeSlots) btnViewFreeSlots.classList.toggle('active', mode === 'freeSlots');
+  };
+
   if (btnViewCombined) {
     btnViewCombined.addEventListener('click', () => {
       friendsState.viewMode = 'combined';
-      btnViewCombined.classList.add('active');
-      const btnFree = document.getElementById('btnFriendsViewFreeSlots');
-      if (btnFree) btnFree.classList.remove('active');
+      updateViewModeButtons('combined');
       renderFriendsView();
     });
   }
-  const btnViewFreeSlots = document.getElementById('btnFriendsViewFreeSlots');
+  if (btnViewGrid) {
+    btnViewGrid.addEventListener('click', () => {
+      friendsState.viewMode = 'grid';
+      updateViewModeButtons('grid');
+      renderFriendsView();
+    });
+  }
   if (btnViewFreeSlots) {
     btnViewFreeSlots.addEventListener('click', () => {
       friendsState.viewMode = 'freeSlots';
-      btnViewFreeSlots.classList.add('active');
-      const btnComb = document.getElementById('btnFriendsViewCombined');
-      if (btnComb) btnComb.classList.remove('active');
+      updateViewModeButtons('freeSlots');
       renderFriendsView();
     });
   }
@@ -2968,21 +2980,30 @@ function renderFriendsView() {
 
   evtCont.style.display = '';
 
+  // ── VIEW MODE: grid ─────────────────────────────────────────────────────────
+  if (friendsState.viewMode === 'grid') {
+    evtCont.innerHTML = renderFriendsGrid(allEvents, hasMyself, hasFriends);
+    return;
+  }
+
   // ── VIEW MODE: free slots ───────────────────────────────────────────────────
   if (friendsState.viewMode === 'freeSlots') {
     evtCont.innerHTML = renderFreeSlots(allEvents, hasMyself, hasFriends);
     return;
   }
 
-  // ── VIEW MODE: combined (default) ───────────────────────────────────────────
+  // ── VIEW MODE: combined list (default) ──────────────────────────────────────
   if (!allEvents.length) {
     evtCont.innerHTML = '<p style="color:var(--text-muted); font-size:0.85rem; text-align:center; padding:24px 0;">Nessuna lezione trovata per questa settimana.</p>';
     return;
   }
 
+  // Merge identical courses across multiple students
+  const mergedEvents = mergeGroupEvents(allEvents);
+
   // Group by date, then sort by time within each day
   const byDate = {};
-  allEvents.forEach(ev => {
+  mergedEvents.forEach(ev => {
     const d = ev.date || '';
     if (!byDate[d]) byDate[d] = [];
     byDate[d].push(ev);
@@ -2996,14 +3017,19 @@ function renderFriendsView() {
     const dayLabel = events[0]?.day_name || formatDateItalianLong(dateFormattedToIso(date));
     html += `<div class="shared-date-group">📅 ${escapeHtml(dayLabel)} — ${escapeHtml(date.split('-').join('/'))}</div>`;
     events.forEach(ev => {
-      const isMe = ev.profile_id === 'MY_SELF';
-      const color = isMe ? MY_COLOR : (friendsState.friends.find(fr => fr.id === ev.profile_id)?.color || '#8B5CF6');
-      const ownerLabel = isMe ? `${escapeHtml(ev.nickname || 'Io')} 👤` : escapeHtml(ev.nickname || '');
+      const hasMe = ev.students.some(s => s.isMe);
+      const primaryColor = hasMe ? MY_COLOR : (ev.students[0]?.color || '#8B5CF6');
       html += `
-        <div class="shared-event-card${isMe ? ' shared-event-card--me' : ''}" style="border-left-color:${color};">
+        <div class="shared-event-card${hasMe ? ' shared-event-card--me' : ''}" style="border-left-color:${primaryColor};">
           <div class="shared-event-header">
             <span class="shared-event-name">${escapeHtml(ev.course || '—')}</span>
-            <span class="shared-event-owner" style="background:${hexToRgba(color, 0.25)}; border:1px solid ${hexToRgba(color, 0.5)}; color:${color};">${ownerLabel}</span>
+            <div class="shared-event-tags">
+              ${ev.students.map(s => `
+                <span class="shared-event-owner" style="background:${hexToRgba(s.color, 0.25)}; border:1px solid ${hexToRgba(s.color, 0.5)}; color:${s.color};">
+                  ${escapeHtml(s.nickname)}${s.isMe ? ' 👤' : ''}
+                </span>
+              `).join('')}
+            </div>
           </div>
           <div class="shared-event-meta">
             ${ev.start_time ? `<span>🕐 ${escapeHtml(ev.start_time)}${ev.end_time ? '–' + escapeHtml(ev.end_time) : ''}</span>` : ''}
@@ -3019,17 +3045,363 @@ function renderFriendsView() {
 }
 
 /**
+ * Merges events that represent the exact same lecture across multiple students.
+ * Two events are identical if they occur on the same date, start_time, end_time,
+ * and have the same course code or course name.
+ */
+function mergeGroupEvents(events) {
+  const mergedMap = new Map();
+
+  events.forEach(ev => {
+    const d    = (ev.date || '').trim();
+    const st   = (ev.start_time || '').trim();
+    const et   = (ev.end_time || '').trim();
+    const code = (ev.course_code || '').trim().toUpperCase();
+    const name = (ev.course || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+    const courseKey = code || name;
+    const key = `${d}_${st}_${et}_${courseKey}`;
+
+    const studentInfo = {
+      id: ev.profile_id,
+      nickname: ev.nickname || (ev.profile_id === 'MY_SELF' ? 'Io' : 'Amico'),
+      color: ev.color || '#8B5CF6',
+      isMe: ev.profile_id === 'MY_SELF'
+    };
+
+    if (mergedMap.has(key)) {
+      const existing = mergedMap.get(key);
+      if (!existing.students.some(s => s.id === studentInfo.id)) {
+        existing.students.push(studentInfo);
+      }
+      if (!existing.aula && ev.aula) existing.aula = ev.aula;
+      if (!existing.docente && ev.docente) existing.docente = ev.docente;
+    } else {
+      mergedMap.set(key, {
+        id: ev.id || key,
+        date: d,
+        day_name: ev.day_name || '',
+        start_time: st,
+        end_time: et,
+        course: ev.course || '—',
+        course_code: ev.course_code || '',
+        aula: ev.aula || '',
+        docente: ev.docente || '',
+        is_canceled: ev.is_canceled || false,
+        students: [studentInfo]
+      });
+    }
+  });
+
+  return Array.from(mergedMap.values());
+}
+
+/**
+ * Visual Day Timeline Grid: 08:30 to 18:30
+ * Renders lectures vertically according to their start/end times and places
+ * overlapping different courses side by side in parallel lanes.
+ */
+function renderFriendsGrid(allEvents, hasMyself, hasFriends) {
+  const START_MIN = 8 * 60 + 30;  // 510 = 08:30
+  const END_MIN   = 18 * 60 + 30; // 1110 = 18:30
+  const TOTAL_MIN = END_MIN - START_MIN; // 600 min
+
+  const timeToMin = t => {
+    if (!t) return 0;
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + (m || 0);
+  };
+  const minToTime = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+  // 1. Build week days (Mon-Fri + optional Sat)
+  const parts = (friendsState.currentMonday || formatFormattedDate(getMonday(new Date()))).split('-');
+  const mondayDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+
+  const dayNamesShort = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
+  const dayNamesLong  = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
+  const weekDays = [];
+
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(mondayDate);
+    d.setDate(mondayDate.getDate() + i);
+    const dStr = formatFormattedDate(d);
+    weekDays.push({
+      dateStr: dStr,
+      nameShort: dayNamesShort[i],
+      nameLong: dayNamesLong[i],
+      dayNum: d.getDate(),
+      monthShort: d.toLocaleDateString('it-IT', { month: 'short' }),
+      isToday: dStr === formatFormattedDate(new Date())
+    });
+  }
+
+  // Check if any event falls on Saturday
+  const hasSaturday = allEvents.some(ev => {
+    const p = (ev.date || '').split('-');
+    if (p.length !== 3) return false;
+    const d = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
+    return d.getDay() === 6;
+  });
+  if (hasSaturday) {
+    const d = new Date(mondayDate);
+    d.setDate(mondayDate.getDate() + 5);
+    const dStr = formatFormattedDate(d);
+    weekDays.push({
+      dateStr: dStr,
+      nameShort: 'Sab',
+      nameLong: 'Sabato',
+      dayNum: d.getDate(),
+      monthShort: d.toLocaleDateString('it-IT', { month: 'short' }),
+      isToday: dStr === formatFormattedDate(new Date())
+    });
+  }
+
+  // Ensure friendsState.selectedGridDate is valid
+  if (!friendsState.selectedGridDate || !weekDays.some(w => w.dateStr === friendsState.selectedGridDate)) {
+    const todayMatch = weekDays.find(w => w.isToday);
+    friendsState.selectedGridDate = todayMatch ? todayMatch.dateStr : weekDays[0].dateStr;
+  }
+
+  const selectedDayInfo = weekDays.find(w => w.dateStr === friendsState.selectedGridDate) || weekDays[0];
+
+  // 2. Day picker pills
+  let pillsHtml = '<div class="friends-day-pills">';
+  weekDays.forEach(w => {
+    const isAct = w.dateStr === friendsState.selectedGridDate;
+    const dayEvCount = allEvents.filter(e => e.date === w.dateStr).length;
+    pillsHtml += `
+      <button class="friends-day-pill${isAct ? ' active' : ''}" onclick="selectFriendsGridDay('${w.dateStr}')">
+        <span class="day-pill-name">${w.nameShort}</span>
+        <span class="day-pill-num">${w.dayNum}</span>
+        ${dayEvCount > 0 
+          ? `<span class="day-pill-dot" title="${dayEvCount} lezioni"></span>` 
+          : `<span class="day-pill-dot free" title="Libero"></span>`}
+        ${w.isToday ? '<span class="day-pill-today">Oggi</span>' : ''}
+      </button>
+    `;
+  });
+  pillsHtml += '</div>';
+
+  // 3. Filter & Merge events for the selected day
+  const rawDayEvents = allEvents.filter(e => e.date === friendsState.selectedGridDate);
+  const dayEvents = mergeGroupEvents(rawDayEvents);
+
+  // Compute start/end in minutes clamped to [START_MIN, END_MIN]
+  const validEvents = [];
+  dayEvents.forEach(ev => {
+    const st = timeToMin(ev.start_time);
+    const et = timeToMin(ev.end_time);
+    if (!st || !et || et <= START_MIN || st >= END_MIN) return;
+
+    const clampedStart = Math.max(START_MIN, st);
+    const clampedEnd   = Math.min(END_MIN, et);
+    if (clampedEnd <= clampedStart) return;
+
+    validEvents.push({
+      ...ev,
+      origStart: st,
+      origEnd: et,
+      evStart: clampedStart,
+      evEnd: clampedEnd,
+      topPx: clampedStart - START_MIN,
+      heightPx: Math.max(34, clampedEnd - clampedStart)
+    });
+  });
+
+  // 4. Overlapping column layout algorithm
+  validEvents.sort((a, b) => a.evStart - b.evStart || b.evEnd - a.evEnd);
+
+  const clusters = [];
+  let currentCluster = [];
+  let clusterMaxEnd = -1;
+
+  for (const ev of validEvents) {
+    if (currentCluster.length === 0) {
+      currentCluster.push(ev);
+      clusterMaxEnd = ev.evEnd;
+    } else if (ev.evStart < clusterMaxEnd) {
+      currentCluster.push(ev);
+      clusterMaxEnd = Math.max(clusterMaxEnd, ev.evEnd);
+    } else {
+      clusters.push(currentCluster);
+      currentCluster = [ev];
+      clusterMaxEnd = ev.evEnd;
+    }
+  }
+  if (currentCluster.length > 0) {
+    clusters.push(currentCluster);
+  }
+
+  for (const cluster of clusters) {
+    const columns = [];
+    for (const ev of cluster) {
+      let placed = false;
+      for (let c = 0; c < columns.length; c++) {
+        const lastInCol = columns[c][columns[c].length - 1];
+        if (lastInCol.evEnd <= ev.evStart) {
+          columns[c].push(ev);
+          ev.colIndex = c;
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        columns.push([ev]);
+        ev.colIndex = columns.length - 1;
+      }
+    }
+    const numCols = columns.length;
+    for (const ev of cluster) {
+      ev.numCols = numCols;
+    }
+  }
+
+  // 5. Hour markers: 08:30 to 18:30 (every 60 min)
+  const hourMarkers = [];
+  for (let m = START_MIN; m <= END_MIN; m += 60) {
+    hourMarkers.push({
+      timeStr: minToTime(m),
+      topPx: m - START_MIN
+    });
+  }
+
+  // 6. Current time line (if selected day is today)
+  let nowLineHtml = '';
+  if (selectedDayInfo.isToday) {
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    if (nowMin >= START_MIN && nowMin <= END_MIN) {
+      const nowTop = nowMin - START_MIN;
+      nowLineHtml = `
+        <div class="friends-grid-now" style="top:${nowTop}px;">
+          <span class="friends-grid-now-badge">${minToTime(nowMin)}</span>
+        </div>
+      `;
+    }
+  }
+
+  // 7. Render event cards on canvas
+  let eventsHtml = '';
+  if (validEvents.length === 0) {
+    eventsHtml = `
+      <div class="friends-grid-empty-banner">
+        <div style="font-size:2rem; margin-bottom:6px;">🎉</div>
+        <strong>Tutto il gruppo è libero ${selectedDayInfo.nameLong}!</strong>
+        <p style="font-size:0.8rem; color:var(--text-secondary); margin-top:4px;">Nessuna lezione in programma tra le 08:30 e le 18:30.</p>
+      </div>
+    `;
+  } else {
+    validEvents.forEach(ev => {
+      const colWidthPercent = 100 / ev.numCols;
+      const leftPercent     = ev.colIndex * colWidthPercent;
+      const hasMe = ev.students.some(s => s.isMe);
+      const primaryColor = hasMe ? '#2DD4BF' : (ev.students[0]?.color || '#8B5CF6');
+      const isShort = ev.heightPx < 55;
+
+      eventsHtml += `
+        <div class="friends-grid-card${hasMe ? ' friends-grid-card--me' : ''}"
+             style="top:${ev.topPx}px; height:${ev.heightPx}px; left:calc(${leftPercent}% + 2px); width:calc(${colWidthPercent}% - 4px); border-left-color:${primaryColor};"
+             onclick="showFriendsEventDetail(this)"
+             data-course="${escapeHtml(ev.course)}"
+             data-time="${escapeHtml(ev.start_time)} – ${escapeHtml(ev.end_time)}"
+             data-aula="${escapeHtml(ev.aula)}"
+             data-docente="${escapeHtml(ev.docente)}"
+             data-students="${escapeHtml(JSON.stringify(ev.students.map(s => s.nickname)))}">
+          <div class="friends-grid-card-inner">
+            <div class="friends-grid-card-tags">
+              ${ev.students.map(s => `
+                <span class="friends-grid-tag" style="background:${hexToRgba(s.color, 0.3)}; color:${s.color}; border:1px solid ${hexToRgba(s.color, 0.6)};">
+                  ${escapeHtml(s.nickname)}${s.isMe ? ' 👤' : ''}
+                </span>
+              `).join('')}
+            </div>
+            <div class="friends-grid-card-title" title="${escapeHtml(ev.course)}">${escapeHtml(ev.course)}</div>
+            <div class="friends-grid-card-time">🕐 ${escapeHtml(ev.start_time)}–${escapeHtml(ev.end_time)}</div>
+            ${!isShort && ev.aula ? `<div class="friends-grid-card-room">📍 ${escapeHtml(ev.aula)}</div>` : ''}
+            ${!isShort && ev.docente ? `<div class="friends-grid-card-prof">👩‍🏫 ${escapeHtml(ev.docente)}</div>` : ''}
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  return `
+    ${pillsHtml}
+    
+    <div class="friends-grid-header-info">
+      <div>
+        <strong style="color:var(--text-primary); font-size:0.95rem;">${selectedDayInfo.nameLong} ${selectedDayInfo.dayNum} ${selectedDayInfo.monthShort}</strong>
+        <span style="font-size:0.75rem; color:var(--text-secondary); margin-left:8px;">08:30 – 18:30</span>
+      </div>
+      <span style="font-size:0.75rem; color:var(--text-muted);">${validEvents.length} ${validEvents.length === 1 ? 'lezione' : 'lezioni'}</span>
+    </div>
+
+    <div class="friends-grid-scroll-box">
+      <div class="friends-grid-wrapper" style="height:${TOTAL_MIN}px;">
+        <!-- Left Time Column -->
+        <div class="friends-grid-times">
+          ${hourMarkers.map(hm => `
+            <div class="friends-grid-time-label" style="top:${hm.topPx}px;">
+              ${hm.timeStr}
+            </div>
+          `).join('')}
+        </div>
+
+        <!-- Canvas with grid lines and cards -->
+        <div class="friends-grid-canvas">
+          ${hourMarkers.map(hm => `
+            <div class="friends-grid-line" style="top:${hm.topPx}px;"></div>
+          `).join('')}
+          ${nowLineHtml}
+          ${eventsHtml}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function selectFriendsGridDay(dateStr) {
+  friendsState.selectedGridDate = dateStr;
+  renderFriendsView();
+}
+if (typeof window !== 'undefined') {
+  window.selectFriendsGridDay = selectFriendsGridDay;
+}
+
+function showFriendsEventDetail(el) {
+  if (!el) return;
+  const course = el.dataset.course || '';
+  const time = el.dataset.time || '';
+  const aula = el.dataset.aula || '';
+  const docente = el.dataset.docente || '';
+  let students = [];
+  try {
+    students = JSON.parse(el.dataset.students || '[]');
+  } catch (e) {}
+
+  let lines = [`📚 ${course}`, `🕐 ${time}`];
+  if (aula) lines.push(`📍 ${aula}`);
+  if (docente) lines.push(`👩‍🏫 ${docente}`);
+  if (students && students.length) {
+    lines.push(`👥 Partecipanti: ${students.join(', ')}`);
+  }
+
+  showToast(lines.join('\n'));
+}
+if (typeof window !== 'undefined') {
+  window.showFriendsEventDetail = showFriendsEventDetail;
+}
+
+/**
  * Compute and render the "free slots" view: time windows during the week
  * when EVERYONE in the group has no lectures scheduled.
  *
- * The analysis is done per day. We consider lectures Mon–Fri between
- * 08:00 and 20:00 and look for gaps ≥ 30 minutes where no one is busy.
+ * Windows are bounded strictly between 08:30 and 18:30.
  */
 function renderFreeSlots(allEvents, hasMyself, hasFriends) {
-  const UNIVERSITY_START = '08:00';
-  const UNIVERSITY_END   = '20:00';
+  const UNIVERSITY_START = '08:30';
+  const UNIVERSITY_END   = '18:30';
   const MIN_FREE_MINUTES = 30;
-  const DAY_NAMES = { '1': 'Lunedì', '2': 'Martedì', '3': 'Mercoledì', '4': 'Giovedì', '5': 'Venerdì' };
 
   const totalMembers = (hasMyself ? 1 : 0) + (hasFriends ? friendsState.friends.length : 0);
 
@@ -3044,37 +3416,60 @@ function renderFreeSlots(allEvents, hasMyself, hasFriends) {
   };
   const minToTime = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
-  // Group busy intervals by date
+  const dayStart = timeToMin(UNIVERSITY_START); // 510 = 08:30
+  const dayEnd   = timeToMin(UNIVERSITY_END);   // 1110 = 18:30
+
+  // 1. Group busy intervals by date, clamping strictly to [dayStart, dayEnd]
   const busyByDate = {};
   allEvents.forEach(ev => {
     const d = ev.date || '';
     if (!d || !ev.start_time || !ev.end_time) return;
-    if (!busyByDate[d]) busyByDate[d] = [];
-    busyByDate[d].push({ start: timeToMin(ev.start_time), end: timeToMin(ev.end_time) });
+    const s = timeToMin(ev.start_time);
+    const e = timeToMin(ev.end_time);
+    const clampedStart = Math.max(dayStart, s);
+    const clampedEnd   = Math.min(dayEnd, e);
+    if (clampedStart < clampedEnd) {
+      if (!busyByDate[d]) busyByDate[d] = [];
+      busyByDate[d].push({ start: clampedStart, end: clampedEnd });
+    }
   });
 
-  const toSortable = s => { const p = s.split('-'); return `${p[2]}-${p[1]}-${p[0]}`; };
-  const dates = Object.keys(busyByDate).sort((a, b) => toSortable(a).localeCompare(toSortable(b)));
+  // 2. Generate all week days (Mon-Fri + optional Sat) so days with zero lectures are shown as 100% free
+  const parts = (friendsState.currentMonday || formatFormattedDate(getMonday(new Date()))).split('-');
+  const mondayDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+  const weekDates = [];
 
-  if (!dates.length) {
-    return `<div class="free-slots-banner">
-      <div style="font-size:2rem; margin-bottom:8px;">🎉</div>
-      <strong>Nessuna lezione questa settimana!</strong>
-      <p style="color:var(--text-secondary); font-size:0.85rem; margin-top:4px;">Tutto il tempo è libero per il gruppo.</p>
-    </div>`;
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(mondayDate);
+    d.setDate(mondayDate.getDate() + i);
+    weekDates.push(formatFormattedDate(d));
+  }
+
+  // If any event falls on Saturday, include Saturday
+  const hasSaturday = allEvents.some(ev => {
+    const p = (ev.date || '').split('-');
+    if (p.length !== 3) return false;
+    const d = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
+    return d.getDay() === 6;
+  });
+  if (hasSaturday) {
+    const d = new Date(mondayDate);
+    d.setDate(mondayDate.getDate() + 5);
+    weekDates.push(formatFormattedDate(d));
   }
 
   let html = `<div class="free-slots-intro">
     <span style="font-size:1.3rem;">🤝</span>
     <div>
-      <strong>Slot liberi per tutto il gruppo</strong><br>
-      <span style="font-size:0.78rem; color:var(--text-secondary);">Fasce orarie in cui <em>tutti</em> sono senza lezioni — ottimi momenti per incontrarsi!</span>
+      <strong>Slot liberi per tutto il gruppo (08:30 – 18:30)</strong><br>
+      <span style="font-size:0.78rem; color:var(--text-secondary);">Fasce orarie in cui <em>tutti</em> sono senza lezioni — ottimi momenti per trovarsi e studiare insieme!</span>
     </div>
   </div>`;
 
   let foundAny = false;
-  dates.forEach(date => {
-    const intervals = busyByDate[date];
+
+  weekDates.forEach(date => {
+    const intervals = busyByDate[date] || [];
     // Merge overlapping busy intervals
     intervals.sort((a, b) => a.start - b.start);
     const merged = [];
@@ -3086,8 +3481,6 @@ function renderFreeSlots(allEvents, hasMyself, hasFriends) {
       }
     }
 
-    const dayStart = timeToMin(UNIVERSITY_START);
-    const dayEnd   = timeToMin(UNIVERSITY_END);
     const freeSlots = [];
     let cursor = dayStart;
     for (const busy of merged) {
@@ -3119,7 +3512,7 @@ function renderFreeSlots(allEvents, hasMyself, hasFriends) {
   });
 
   if (!foundAny) {
-    html += '<p style="color:var(--text-muted); font-size:0.85rem; text-align:center; padding:24px 0;">Nessuno slot libero comune trovato questa settimana 😅</p>';
+    html += '<p style="color:var(--text-muted); font-size:0.85rem; text-align:center; padding:24px 0;">Nessuno slot libero comune trovato tra le 08:30 e le 18:30 😅</p>';
   }
 
   return html;

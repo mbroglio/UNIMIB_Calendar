@@ -44,8 +44,10 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 - **🔗 Instant Link or Code Sharing**: Add friends by entering their 6-character calendar code, or send them a direct link (e.g. `/?friend=K9X2P4`) which automatically opens the friends tab and adds them to the calendar with a single tap.
 - **⭐ Favorites-Only Sharing**: When viewing a friend's schedule, only the subjects they have personally selected (⭐ I miei corsi) are shown — not their entire degree programme. If no favorites are set, all courses are shown as a fallback.
 - **👤 Include Yourself**: Toggle **"👤 Includi me"** to overlay your own schedule (filtered to your selected subjects) alongside your friends' timetables, shown in teal with a distinct "Io 👤" badge.
-- **📅 Combined Timetable View**: See everyone's lectures on a unified weekly calendar with color-coded per-person badges, sorted by day and time.
-- **🟢 Free Slots View**: Switch to **"🟢 Slot liberi"** mode to automatically compute time windows (≥ 30 min) during the week when **everyone** in the group has no lectures — perfect for finding study breaks or meeting times.
+- **🏷️ Merged Shared Courses**: When multiple students in the group attend the same course at the same time, it is displayed as a single consolidated card displaying badges for all attendees (e.g. `[Io 👤] [Mario] [Luca]`), eliminating duplicate cards.
+- **📅 Chronological List View**: Toggle **"📋 Elenco"** to browse all group lectures ordered day-by-day and time-by-time.
+- **📊 Daily Timeline Grid (08:30 – 18:30)**: Toggle **"📊 Vista Oraria"** to see a vertical time grid for any day of the week. Courses fill their vertical time slots, and different courses overlapping in the same hours are automatically packed side-by-side in parallel lanes with a live indicator for the current time.
+- **🟢 Free Slots View (up to 18:30)**: Switch to **"🟢 Slot liberi"** to calculate time windows (≥ 30 min) between 08:30 and 18:30 when **everyone** in the group has no lectures — perfect for finding study breaks, project meetings, or lunch times.
 - **👥 One-Tap Group Links**: Click **🔗 Condividi** to generate a link (e.g. `/?group=K9X2P4,W3M7R2`) so an entire study group can load all friends at once. All profiles in the group are fetched in parallel for speed.
 
 ### 6. 📱 iOS & Mobile Optimizations
