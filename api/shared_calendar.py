@@ -6,6 +6,11 @@ each student's profile from Redis and then calling /api/calendar
 for their individual timetable.
 
 GET /api/shared_calendar?ids=ID1,ID2,ID3&date=DD-MM-YYYY
+GET /api/shared_calendar?codes=CODE1,CODE2&date=DD-MM-YYYY
+
+Returns ONLY the courses each student has marked as favourites
+(config.favorites). If a student has no favourites, all their
+courses are returned (full study-year timetable).
 
 Returns:
 {
@@ -102,10 +107,15 @@ def _get_monday(date_str: str) -> str:
     return monday.strftime("%d-%m-%Y")
 
 
-def _fetch_events(cfg: dict, date_str: str) -> list:
+def _fetch_events(cfg: dict, date_str: str, favorite_codes: list | None = None) -> list:
     """
     Fetch the weekly timetable events for a given config + week.
     Mirrors the logic in api/calendar.py exactly.
+
+    If favorite_codes is provided and non-empty, only events whose
+    course_code appears in that list are returned (i.e. the student's
+    selected subjects).  When favorite_codes is empty or None every
+    event in the study-year timetable is returned.
     """
     anno   = cfg.get("anno", "")
     corso  = cfg.get("corso", "")
@@ -140,16 +150,24 @@ def _fetch_events(cfg: dict, date_str: str) -> list:
         except (ValueError, TypeError):
             return 0
 
+    # Normalise favourite codes to upper-case set for fast lookup
+    fav_set = {code.upper() for code in favorite_codes} if favorite_codes else None
+
     celle  = sorted(raw_data.get("celle", []), key=_safe_ts)
     events = []
     for c in celle:
+        course_code = c.get("codice_insegnamento", "")
+        # Filter: if the student has selected favourite courses, only
+        # include events that belong to those courses.
+        if fav_set and course_code.upper() not in fav_set:
+            continue
         events.append({
             "date":        c.get("data", ""),
             "day_name":    c.get("nome_giorno", "").capitalize(),
             "start_time":  c.get("ora_inizio", ""),
             "end_time":    c.get("ora_fine", ""),
             "course":      c.get("nome_insegnamento", "").strip(),
-            "course_code": c.get("codice_insegnamento", ""),
+            "course_code": course_code,
             "aula":        c.get("aula", "").strip(),
             "docente":     c.get("docente", "").strip(),
             "is_canceled": c.get("Annullato") == "1",
@@ -217,9 +235,15 @@ class handler(BaseHTTPRequestHandler):
             nickname = profile.get("nickname", share_id)
             cfg      = profile.get("config") or {}
 
+            # Extract the student's selected favourite course codes.
+            # If they have selected specific subjects, we show only those;
+            # otherwise we fall back to showing the full study-year timetable.
+            favorites      = cfg.get("favorites") or []
+            favorite_codes = [f.get("code", "") for f in favorites if f.get("code")] if favorites else None
+
             profiles_out.append({"id": share_id, "share_code": share_id, "nickname": nickname, "color": color})
 
-            events = _fetch_events(cfg, monday)
+            events = _fetch_events(cfg, monday, favorite_codes if favorite_codes else None)
             for ev in events:
                 ev["profile_id"] = share_id
                 ev["nickname"]   = nickname

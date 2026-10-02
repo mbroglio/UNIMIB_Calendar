@@ -262,7 +262,7 @@
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <div>
           <h3 style="font-size:1rem; color:var(--text-primary); margin:0 0 2px;">👥 Calendario Amici</h3>
-          <p style="font-size:0.78rem; color:var(--text-secondary); margin:0;">Inserisci i codici dei tuoi amici per vedere i vostri orari combinati</p>
+          <p style="font-size:0.78rem; color:var(--text-secondary); margin:0;">Confronta i vostri orari e trovate i momenti liberi in comune</p>
         </div>
         <div style="display:flex; gap:8px;">
           <button id="btnShareFriendsGroup" class="btn-secondary" style="width:auto; padding:8px 12px; font-size:0.82rem; white-space:nowrap;" title="Condividi link gruppo con amici">🔗 Condividi</button>
@@ -273,6 +273,18 @@
       <!-- Friend chips list -->
       <div id="friendChips" class="exam-courses-bar" style="margin-bottom:12px; min-height:36px;">
         <!-- Rendered dynamically -->
+      </div>
+
+      <!-- "Include myself" toggle (only shown when user is logged in with a profile) -->
+      <div id="friendsMyselfRow" style="margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+        <button id="btnToggleMyself" class="toggle-btn active" style="width:auto; padding:6px 12px; font-size:0.8rem; white-space:nowrap;">👤 Includi me</button>
+        <span style="font-size:0.75rem; color:var(--text-muted); flex:1;">Il tuo orario (⭐ materie selezionate) verrà mostrato insieme a quello degli amici</span>
+      </div>
+
+      <!-- View Mode Toggle: Combined | Free Slots -->
+      <div class="toggle-group" style="margin-bottom:10px;">
+        <button id="btnFriendsViewCombined" class="toggle-btn active">📅 Orari combinati</button>
+        <button id="btnFriendsViewFreeSlots" class="toggle-btn">🟢 Slot liberi</button>
       </div>
 
       <!-- Week navigation for shared calendar -->
@@ -625,6 +637,9 @@
       </div>
     </div>
   </div>
+
+  <!-- Toast Notification -->
+  <div id="toastNotification" class="toast"></div>
 
   <!-- JS Logic -->
   <script src="/js/app.js"></script>

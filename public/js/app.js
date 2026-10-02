@@ -69,7 +69,10 @@ let friendsState = {
   friends: [],        // [{id, nickname, color}]
   currentMonday: null,
   events: [],
-  isLoading: false
+  myEvents: [],       // current user's own events (if profile is set)
+  isLoading: false,
+  showMyself: true,   // whether to include the current user's own schedule
+  viewMode: 'combined' // 'combined' | 'freeSlots'
 };
 
 // Options loaded from the UNIMIB dropdown data while the setup modal is open
@@ -110,10 +113,20 @@ function initApp() {
   if (shared) {
     enterPreview(shared);
   } else if (friendParam) {
-    if (state.config) applyConfig();
+    if (state.config) {
+      applyConfig();
+    } else {
+      // No config – make sure the timetable spinner is hidden so the app
+      // doesn't get stuck in an infinite loading state.
+      showWelcome();
+    }
     handleFriendShareUrl(friendParam);
   } else if (groupParam) {
-    if (state.config) applyConfig();
+    if (state.config) {
+      applyConfig();
+    } else {
+      showWelcome();
+    }
     handleSharedGroupUrl(groupParam);
   } else if (state.config) {
     applyConfig();
@@ -221,6 +234,37 @@ function setupEventListeners() {
     friendsState.currentMonday = formatFormattedDate(getMonday(new Date()));
     loadFriendsCalendar();
   });
+  // Toggle: include myself in group view
+  const btnToggleMyself = document.getElementById('btnToggleMyself');
+  if (btnToggleMyself) {
+    btnToggleMyself.addEventListener('click', () => {
+      friendsState.showMyself = !friendsState.showMyself;
+      btnToggleMyself.classList.toggle('active', friendsState.showMyself);
+      btnToggleMyself.textContent = friendsState.showMyself ? '👤 Includi me' : '👤 Escludi me';
+      renderFriendsView();
+    });
+  }
+  // Toggle: view mode (combined events / free slots)
+  const btnViewCombined = document.getElementById('btnFriendsViewCombined');
+  if (btnViewCombined) {
+    btnViewCombined.addEventListener('click', () => {
+      friendsState.viewMode = 'combined';
+      btnViewCombined.classList.add('active');
+      const btnFree = document.getElementById('btnFriendsViewFreeSlots');
+      if (btnFree) btnFree.classList.remove('active');
+      renderFriendsView();
+    });
+  }
+  const btnViewFreeSlots = document.getElementById('btnFriendsViewFreeSlots');
+  if (btnViewFreeSlots) {
+    btnViewFreeSlots.addEventListener('click', () => {
+      friendsState.viewMode = 'freeSlots';
+      btnViewFreeSlots.classList.add('active');
+      const btnComb = document.getElementById('btnFriendsViewCombined');
+      if (btnComb) btnComb.classList.remove('active');
+      renderFriendsView();
+    });
+  }
 
   // Onboarding Modal listeners
   const btnOnbCreate = document.getElementById('btnOnboardingCreate');
@@ -1412,7 +1456,8 @@ function isoToDisplayDate(iso) {
   } else if (tabId === 'friends') {
     document.getElementById('headerSubtitle').textContent = 'Calendario condiviso amici';
     renderFriendChips();
-    if (friendsState.friends.length && !friendsState.events.length) {
+    if ((friendsState.friends.length || (profileState.shareCode && state.config)) &&
+        !friendsState.events.length && !friendsState.myEvents.length) {
       loadFriendsCalendar();
     } else {
       renderFriendsView();
@@ -2667,6 +2712,20 @@ function confirmAddFriendByCode() {
   const profile = btn ? btn._foundProfile : null;
   if (!profile) return;
 
+  // Clear the stored profile and disable the button immediately so the
+  // user can't add the same person again without re-verifying a code.
+  if (btn) {
+    btn._foundProfile = null;
+    btn.disabled = true;
+  }
+
+  const input = document.getElementById('friendCodeInput');
+  if (input) input.value = '';
+  const prev = document.getElementById('friendCodePreview');
+  if (prev) prev.style.display = 'none';
+  const err = document.getElementById('friendCodeError');
+  if (err) err.style.display = 'none';
+
   _addFriend({ id: profile.id, nickname: profile.nickname });
   const modal = document.getElementById('addFriendModal');
   if (modal) modal.classList.remove('active');
@@ -2687,6 +2746,10 @@ function addFriendFromSearch(id, nickname) {
 }
 
 function _addFriend({ id, nickname }) {
+  if (friendsState.friends.some(f => (f.id || '').toUpperCase() === (id || '').toUpperCase())) {
+    showToast(`${nickname} è già nel tuo calendario`);
+    return;
+  }
   const colorIndex = friendsState.friends.length % FRIENDS_COLORS.length;
   const color      = FRIENDS_COLORS[colorIndex];
   friendsState.friends.push({ id, nickname, color });
@@ -2707,15 +2770,36 @@ function removeFriend(id) {
   // Reassign colors to maintain consistency
   friendsState.friends.forEach((f, i) => { f.color = FRIENDS_COLORS[i % FRIENDS_COLORS.length]; });
   saveFriends(friendsState.friends);
-  friendsState.events = [];
+  friendsState.events  = [];
+  friendsState.myEvents = [];
   renderFriendChips();
-  renderFriendsView();
+  // If any members remain (friends or self), reload the calendar; otherwise just re-render
+  const hasFriends = friendsState.friends.length > 0;
+  const hasMyself  = friendsState.showMyself && profileState.shareCode && state.config;
+  if (hasFriends || hasMyself) {
+    loadFriendsCalendar();
+  } else {
+    renderFriendsView();
+  }
   showToast('Amico rimosso dal calendario');
 }
 
 function renderFriendChips() {
   const container = document.getElementById('friendChips');
   if (!container) return;
+
+  // Show/hide "Include me" row based on whether the user has a profile + config
+  const myselfRow = document.getElementById('friendsMyselfRow');
+  const hasProfile = Boolean(profileState.shareCode && state.config);
+  if (myselfRow) myselfRow.style.display = hasProfile ? '' : 'none';
+
+  // Sync the toggle button text to match current state
+  const btnToggle = document.getElementById('btnToggleMyself');
+  if (btnToggle) {
+    btnToggle.classList.toggle('active', friendsState.showMyself);
+    btnToggle.textContent = friendsState.showMyself ? '👤 Includi me' : '👤 Escludi me';
+  }
+
   if (!friendsState.friends.length) {
     container.innerHTML = '<span style="color:var(--text-muted); font-size:0.8rem; line-height:32px;">Nessun amico aggiunto — usa il pulsante + per iniziare</span>';
     return;
@@ -2737,38 +2821,74 @@ function hexToRgba(hex, alpha) {
 }
 
 async function loadFriendsCalendar() {
-  if (!friendsState.friends.length) {
+  const hasFriends = friendsState.friends.length > 0;
+  const hasMyself  = friendsState.showMyself && profileState.shareCode && state.config;
+
+  if (!hasFriends && !hasMyself) {
     renderFriendsView();
     return;
   }
 
   friendsState.isLoading = true;
+  friendsState.myEvents  = [];
   renderFriendsView(); // shows spinner
 
-  const ids  = friendsState.friends.map(f => f.id).join(',');
   const date = friendsState.currentMonday
     ? friendsState.currentMonday.split('-').join('-')  // already DD-MM-YYYY
     : formatFormattedDate(getMonday(new Date()));
 
-  try {
-    const resp = await fetchJson(`/api/shared_calendar?ids=${encodeURIComponent(ids)}&date=${encodeURIComponent(date)}`);
-    friendsState.events  = resp.events || [];
-    // Update friend colors from server response (in case order changed)
-    (resp.profiles || []).forEach(p => {
-      const pId = (p.share_code || p.id || '').toUpperCase();
-      const local = friendsState.friends.find(f => (f.id || '').toUpperCase() === pId);
-      if (local) local.color = p.color;
-    });
-    saveFriends(friendsState.friends);
-  } catch (e) {
-    console.warn('Friends calendar load error:', e);
+  // ── 1. Fetch friends' events from shared_calendar API ─────────────────────
+  if (hasFriends) {
+    try {
+      const ids  = friendsState.friends.map(f => f.id).join(',');
+      const resp = await fetchJson(`/api/shared_calendar?ids=${encodeURIComponent(ids)}&date=${encodeURIComponent(date)}`);
+      friendsState.events  = resp.events || [];
+      // Update friend colors from server response (in case order changed)
+      (resp.profiles || []).forEach(p => {
+        const pId = (p.share_code || p.id || '').toUpperCase();
+        const local = friendsState.friends.find(f => (f.id || '').toUpperCase() === pId);
+        if (local) local.color = p.color;
+      });
+      saveFriends(friendsState.friends);
+    } catch (e) {
+      console.warn('Friends calendar load error:', e);
+      friendsState.events = [];
+    }
+  } else {
     friendsState.events = [];
-  } finally {
-    friendsState.isLoading = false;
-    updateFriendsWeekLabel();
-    renderFriendChips();
-    renderFriendsView();
   }
+
+  // ── 2. Fetch own events from calendar API (if logged in + config set) ──────
+  if (hasMyself) {
+    try {
+      const cfg = state.config;
+      // Convert DD-MM-YYYY → usable date param
+      const calUrl = `/api/calendar?anno=${encodeURIComponent(cfg.anno)}&corso=${encodeURIComponent(cfg.corso)}&date=${encodeURIComponent(date)}` +
+                     cfg.anni.map(a => `&anno2=${encodeURIComponent(a)}`).join('');
+      const calData = await fetchJson(calUrl);
+      let myEvs = calData.events || [];
+      // Filter to favourites only (same logic as the shared_calendar backend)
+      const favCodes = new Set((cfg.favorites || []).map(f => (f.code || '').toUpperCase()).filter(Boolean));
+      if (favCodes.size > 0) {
+        myEvs = myEvs.filter(e => favCodes.has((e.course_code || '').toUpperCase()));
+      }
+      // Attach "MY_SELF" profile metadata so the renderer can distinguish me
+      myEvs.forEach(ev => {
+        ev.profile_id = 'MY_SELF';
+        ev.nickname   = profileState.nickname || 'Io';
+        ev.color      = '#2DD4BF'; // teal – distinct from friends palette
+      });
+      friendsState.myEvents = myEvs;
+    } catch (e) {
+      console.warn('Own calendar load error for friends view:', e);
+      friendsState.myEvents = [];
+    }
+  }
+
+  friendsState.isLoading = false;
+  updateFriendsWeekLabel();
+  renderFriendChips();
+  renderFriendsView();
 }
 
 function changeFriendsWeek(offset) {
@@ -2776,7 +2896,8 @@ function changeFriendsWeek(offset) {
   const dt    = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
   dt.setDate(dt.getDate() + offset);
   friendsState.currentMonday = formatFormattedDate(getMonday(dt));
-  friendsState.events = [];
+  friendsState.events  = [];
+  friendsState.myEvents = [];
   loadFriendsCalendar();
 }
 
@@ -2800,62 +2921,89 @@ function renderFriendsView() {
     spinner.style.display  = '';
     empty.style.display    = 'none';
     evtCont.style.display  = 'none';
-    legend.style.display   = 'none';
+    if (legend) legend.style.display = 'none';
     return;
   }
 
   spinner.style.display = 'none';
 
-  if (!friendsState.friends.length) {
+  const hasFriends = friendsState.friends.length > 0;
+  const hasMyself  = friendsState.showMyself && profileState.shareCode && state.config && friendsState.myEvents.length > 0;
+
+  if (!hasFriends && !hasMyself) {
     empty.style.display   = '';
     evtCont.style.display = 'none';
-    legend.style.display  = 'none';
+    if (legend) legend.style.display = 'none';
     return;
   }
 
   empty.style.display = 'none';
 
-  // Render legend
-  legend.style.display = '';
-  legend.innerHTML = friendsState.friends.map(f => `
-    <div class="friends-legend-item">
-      <span class="friends-legend-dot" style="background:${f.color};"></span>
-      <span>${escapeHtml(f.nickname)}</span>
-    </div>
-  `).join('');
+  // ── Build combined event list ───────────────────────────────────────────────
+  const MY_COLOR = '#2DD4BF';
+  const allEvents = [
+    ...(hasMyself ? friendsState.myEvents : []),
+    ...(hasFriends ? friendsState.events : [])
+  ];
 
-  if (!friendsState.events.length) {
-    evtCont.style.display = '';
-    evtCont.innerHTML = '<p style="color:var(--text-muted); font-size:0.85rem; text-align:center; padding:24px 0;">Nessuna lezione trovata per questa settimana.</p>';
-    return;
+  // ── Render legend ───────────────────────────────────────────────────────────
+  if (legend) {
+    legend.style.display = '';
+    let legendHtml = '';
+    if (hasMyself) {
+      legendHtml += `
+        <div class="friends-legend-item">
+          <span class="friends-legend-dot" style="background:${MY_COLOR};"></span>
+          <span><strong>${escapeHtml(profileState.nickname || 'Io')}</strong> <span style="font-size:0.7rem;opacity:0.7;">(tu)</span></span>
+        </div>`;
+    }
+    legendHtml += friendsState.friends.map(f => `
+      <div class="friends-legend-item">
+        <span class="friends-legend-dot" style="background:${f.color};"></span>
+        <span>${escapeHtml(f.nickname)}</span>
+      </div>
+    `).join('');
+    legend.innerHTML = legendHtml;
   }
 
   evtCont.style.display = '';
 
-  // Group by date
+  // ── VIEW MODE: free slots ───────────────────────────────────────────────────
+  if (friendsState.viewMode === 'freeSlots') {
+    evtCont.innerHTML = renderFreeSlots(allEvents, hasMyself, hasFriends);
+    return;
+  }
+
+  // ── VIEW MODE: combined (default) ───────────────────────────────────────────
+  if (!allEvents.length) {
+    evtCont.innerHTML = '<p style="color:var(--text-muted); font-size:0.85rem; text-align:center; padding:24px 0;">Nessuna lezione trovata per questa settimana.</p>';
+    return;
+  }
+
+  // Group by date, then sort by time within each day
   const byDate = {};
-  friendsState.events.forEach(ev => {
+  allEvents.forEach(ev => {
     const d = ev.date || '';
     if (!byDate[d]) byDate[d] = [];
     byDate[d].push(ev);
   });
 
+  const toSortable = s => { const p = s.split('-'); return `${p[2]}-${p[1]}-${p[0]}`; };
+
   let html = '';
-  Object.keys(byDate).sort((a, b) => {
-    // a,b are DD-MM-YYYY
-    const toSortable = s => { const p = s.split('-'); return `${p[2]}-${p[1]}-${p[0]}`; };
-    return toSortable(a).localeCompare(toSortable(b));
-  }).forEach(date => {
-    const events = byDate[date];
+  Object.keys(byDate).sort((a, b) => toSortable(a).localeCompare(toSortable(b))).forEach(date => {
+    const events = byDate[date].slice().sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
     const dayLabel = events[0]?.day_name || formatDateItalianLong(dateFormattedToIso(date));
     html += `<div class="shared-date-group">📅 ${escapeHtml(dayLabel)} — ${escapeHtml(date.split('-').join('/'))}</div>`;
     events.forEach(ev => {
-      const f = friendsState.friends.find(fr => fr.id === ev.profile_id) || { color: '#8B5CF6', nickname: ev.nickname || '' };
+      const isMe = ev.profile_id === 'MY_SELF';
+      const color = isMe ? MY_COLOR : (friendsState.friends.find(fr => fr.id === ev.profile_id)?.color || '#8B5CF6');
+      const ownerLabel = isMe ? `${escapeHtml(ev.nickname || 'Io')} 👤` : escapeHtml(ev.nickname || '');
       html += `
-        <div class="shared-event-card" style="border-left-color:${f.color};">
+        <div class="shared-event-card${isMe ? ' shared-event-card--me' : ''}" style="border-left-color:${color};">
           <div class="shared-event-header">
             <span class="shared-event-name">${escapeHtml(ev.course || '—')}</span>
-            <span class="shared-event-owner" style="background:${hexToRgba(f.color, 0.25)}; border:1px solid ${hexToRgba(f.color, 0.5)}; color:${f.color};">${escapeHtml(ev.nickname || '')}</span>
+            <span class="shared-event-owner" style="background:${hexToRgba(color, 0.25)}; border:1px solid ${hexToRgba(color, 0.5)}; color:${color};">${ownerLabel}</span>
           </div>
           <div class="shared-event-meta">
             ${ev.start_time ? `<span>🕐 ${escapeHtml(ev.start_time)}${ev.end_time ? '–' + escapeHtml(ev.end_time) : ''}</span>` : ''}
@@ -2868,6 +3016,113 @@ function renderFriendsView() {
   });
 
   evtCont.innerHTML = html;
+}
+
+/**
+ * Compute and render the "free slots" view: time windows during the week
+ * when EVERYONE in the group has no lectures scheduled.
+ *
+ * The analysis is done per day. We consider lectures Mon–Fri between
+ * 08:00 and 20:00 and look for gaps ≥ 30 minutes where no one is busy.
+ */
+function renderFreeSlots(allEvents, hasMyself, hasFriends) {
+  const UNIVERSITY_START = '08:00';
+  const UNIVERSITY_END   = '20:00';
+  const MIN_FREE_MINUTES = 30;
+  const DAY_NAMES = { '1': 'Lunedì', '2': 'Martedì', '3': 'Mercoledì', '4': 'Giovedì', '5': 'Venerdì' };
+
+  const totalMembers = (hasMyself ? 1 : 0) + (hasFriends ? friendsState.friends.length : 0);
+
+  if (totalMembers < 2) {
+    return '<p style="color:var(--text-muted); font-size:0.85rem; text-align:center; padding:24px 0;">Aggiungi almeno un amico per vedere gli slot liberi in comune.</p>';
+  }
+
+  const timeToMin = t => {
+    if (!t) return 0;
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + (m || 0);
+  };
+  const minToTime = m => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+  // Group busy intervals by date
+  const busyByDate = {};
+  allEvents.forEach(ev => {
+    const d = ev.date || '';
+    if (!d || !ev.start_time || !ev.end_time) return;
+    if (!busyByDate[d]) busyByDate[d] = [];
+    busyByDate[d].push({ start: timeToMin(ev.start_time), end: timeToMin(ev.end_time) });
+  });
+
+  const toSortable = s => { const p = s.split('-'); return `${p[2]}-${p[1]}-${p[0]}`; };
+  const dates = Object.keys(busyByDate).sort((a, b) => toSortable(a).localeCompare(toSortable(b)));
+
+  if (!dates.length) {
+    return `<div class="free-slots-banner">
+      <div style="font-size:2rem; margin-bottom:8px;">🎉</div>
+      <strong>Nessuna lezione questa settimana!</strong>
+      <p style="color:var(--text-secondary); font-size:0.85rem; margin-top:4px;">Tutto il tempo è libero per il gruppo.</p>
+    </div>`;
+  }
+
+  let html = `<div class="free-slots-intro">
+    <span style="font-size:1.3rem;">🤝</span>
+    <div>
+      <strong>Slot liberi per tutto il gruppo</strong><br>
+      <span style="font-size:0.78rem; color:var(--text-secondary);">Fasce orarie in cui <em>tutti</em> sono senza lezioni — ottimi momenti per incontrarsi!</span>
+    </div>
+  </div>`;
+
+  let foundAny = false;
+  dates.forEach(date => {
+    const intervals = busyByDate[date];
+    // Merge overlapping busy intervals
+    intervals.sort((a, b) => a.start - b.start);
+    const merged = [];
+    for (const iv of intervals) {
+      if (merged.length && iv.start <= merged[merged.length - 1].end) {
+        merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, iv.end);
+      } else {
+        merged.push({ ...iv });
+      }
+    }
+
+    const dayStart = timeToMin(UNIVERSITY_START);
+    const dayEnd   = timeToMin(UNIVERSITY_END);
+    const freeSlots = [];
+    let cursor = dayStart;
+    for (const busy of merged) {
+      if (busy.start > cursor && (busy.start - cursor) >= MIN_FREE_MINUTES) {
+        freeSlots.push({ start: cursor, end: busy.start });
+      }
+      cursor = Math.max(cursor, busy.end);
+    }
+    if (dayEnd - cursor >= MIN_FREE_MINUTES) {
+      freeSlots.push({ start: cursor, end: dayEnd });
+    }
+
+    if (!freeSlots.length) return;
+    foundAny = true;
+
+    const dayLabel = formatDateItalianLong(dateFormattedToIso(date));
+    html += `<div class="free-slots-day-header">📌 ${escapeHtml(dayLabel)}</div>`;
+    freeSlots.forEach(slot => {
+      const duration = slot.end - slot.start;
+      const durationStr = duration >= 60
+        ? `${Math.floor(duration / 60)}h${duration % 60 > 0 ? duration % 60 + 'min' : ''}`
+        : `${duration} min`;
+      html += `
+        <div class="free-slot-card">
+          <div class="free-slot-time">🟢 ${minToTime(slot.start)} – ${minToTime(slot.end)}</div>
+          <div class="free-slot-duration">${durationStr} liberi • tutti disponibili</div>
+        </div>`;
+    });
+  });
+
+  if (!foundAny) {
+    html += '<p style="color:var(--text-muted); font-size:0.85rem; text-align:center; padding:24px 0;">Nessuno slot libero comune trovato questa settimana 😅</p>';
+  }
+
+  return html;
 }
 
 // Helper: DD-MM-YYYY → YYYY-MM-DD
@@ -2918,7 +3173,11 @@ async function handleFriendShareUrl(friendCode) {
   const code = (friendCode || '').trim().toUpperCase();
   if (!code) return;
 
-  showToast('Caricamento calendario amico... 👥');
+  // Immediately switch to the friends tab so the user sees the loading state there,
+  // not a stuck spinner on the timetable view.
+  switchTab('friends');
+  friendsState.isLoading = true;
+  renderFriendsView();
 
   try {
     let resp = await fetch(`/api/profile?code=${encodeURIComponent(code)}`);
@@ -2927,6 +3186,8 @@ async function handleFriendShareUrl(friendCode) {
     }
     const data = await resp.json();
     if (!resp.ok) {
+      friendsState.isLoading = false;
+      renderFriendsView();
       showToast('Codice calendario amico non valido o non trovato ❌');
       return;
     }
@@ -2936,16 +3197,21 @@ async function handleFriendShareUrl(friendCode) {
 
     if (profileState.shareCode && friendId.toUpperCase() === profileState.shareCode.toUpperCase()) {
       showToast('Questo è il tuo link calendario!');
+      friendsState.isLoading = false;
+      renderFriendsView();
     } else if (friendsState.friends.some(f => (f.id || '').toUpperCase() === friendId.toUpperCase())) {
       showToast(`${nickname} è già nel tuo calendario amici`);
+      friendsState.isLoading = false;
+      loadFriendsCalendar(); // reload to ensure view is current
     } else {
+      // _addFriend handles saving and triggers loadFriendsCalendar (we set isLoading=false first)
+      friendsState.isLoading = false;
       _addFriend({ id: friendId, nickname: nickname });
     }
-
-    switchTab('friends');
-    loadFriendsCalendar();
   } catch (err) {
     console.error('Error fetching friend by link:', err);
+    friendsState.isLoading = false;
+    renderFriendsView();
     showToast('Errore nel caricamento del link amico');
   } finally {
     // Clean URL without reloading page
@@ -2960,21 +3226,29 @@ async function handleSharedGroupUrl(groupStr) {
 
   if (!codes.length) return;
 
-  showToast('Caricamento gruppo amici... 👥');
+  // Switch to friends tab immediately so the user sees the loading state there
+  switchTab('friends');
+  friendsState.isLoading = true;
+  friendsState.events    = [];
+  friendsState.myEvents  = [];
+  renderFriendsView();
 
-  for (const code of codes) {
+  // Fetch all group member profiles in parallel for speed
+  const fetchPromises = codes.map(async code => {
     const isSelf = (profileState.shareCode && code === profileState.shareCode.toUpperCase()) ||
                    (profileState.nickname && code.toLowerCase() === profileState.nickname.toLowerCase());
-    if (!friendsState.friends.some(f => (f.id || '').toUpperCase() === code) && !isSelf) {
-      try {
-        let resp = await fetch(`/api/profile?code=${encodeURIComponent(code)}`);
-        if (!resp.ok) {
-          resp = await fetch(`/api/profile?id=${encodeURIComponent(code)}`);
-        }
-        if (resp.ok) {
-          const profile = await resp.json();
-          const friendId = profile.share_code || profile.id || code;
-          const friendNick = profile.nickname || friendId;
+    if (friendsState.friends.some(f => (f.id || '').toUpperCase() === code) || isSelf) return;
+    try {
+      let resp = await fetch(`/api/profile?code=${encodeURIComponent(code)}`);
+      if (!resp.ok) {
+        resp = await fetch(`/api/profile?id=${encodeURIComponent(code)}`);
+      }
+      if (resp.ok) {
+        const profile = await resp.json();
+        const friendId   = profile.share_code || profile.id || code;
+        const friendNick = profile.nickname || friendId;
+        // Only add if not already present
+        if (!friendsState.friends.some(f => (f.id || '').toUpperCase() === friendId.toUpperCase())) {
           const colorIndex = friendsState.friends.length % FRIENDS_COLORS.length;
           friendsState.friends.push({
             id: friendId,
@@ -2982,17 +3256,21 @@ async function handleSharedGroupUrl(groupStr) {
             color: FRIENDS_COLORS[colorIndex]
           });
         }
-      } catch (err) {
-        console.warn('Error fetching group profile:', code, err);
       }
+    } catch (err) {
+      console.warn('Error fetching group profile:', code, err);
     }
-  }
+  });
+
+  await Promise.all(fetchPromises);
 
   saveFriends(friendsState.friends);
   renderFriendChips();
   // Clean URL without reloading page
   history.replaceState(null, '', window.location.pathname);
-  switchTab('friends');
+
+  friendsState.isLoading = false;
+  // loadFriendsCalendar will set isLoading=true and fetch everything properly
   loadFriendsCalendar();
   showToast('Gruppo amici caricato nel calendario! 🎉');
 }

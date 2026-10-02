@@ -41,9 +41,12 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 
 ### 5. 👥 Friends Shared Calendar (Calendario Amici)
 - **🔒 Privacy First (Zero Leaked Credentials)**: Your personal PIN remains strictly private and is only used to log in on your own devices. The system generates an independent, unique 6-character **Codice Calendario Univoco** (e.g. `K9X2P4`) using unambiguous characters (no `0`, `O`, `1`, `I`).
-- **🔗 Instant Link or Code Sharing**: Add friends by entering their 6-character calendar code, or send them a direct link (e.g. `/?friend=K9X2P4`) which automatically adds them to their calendar with a single tap.
-- **🤝 Compare Timetables**: See your schedule and your friends' schedules combined on a single weekly calendar with distinct color-coded badges to easily spot common free hours and overlapping classes.
-- **👥 One-Tap Group Links**: Click **🔗 Condividi Gruppo** to generate a link (e.g. `/?group=K9X2P4,W3M7R2`) so an entire study group can load all friends at once.
+- **🔗 Instant Link or Code Sharing**: Add friends by entering their 6-character calendar code, or send them a direct link (e.g. `/?friend=K9X2P4`) which automatically opens the friends tab and adds them to the calendar with a single tap.
+- **⭐ Favorites-Only Sharing**: When viewing a friend's schedule, only the subjects they have personally selected (⭐ I miei corsi) are shown — not their entire degree programme. If no favorites are set, all courses are shown as a fallback.
+- **👤 Include Yourself**: Toggle **"👤 Includi me"** to overlay your own schedule (filtered to your selected subjects) alongside your friends' timetables, shown in teal with a distinct "Io 👤" badge.
+- **📅 Combined Timetable View**: See everyone's lectures on a unified weekly calendar with color-coded per-person badges, sorted by day and time.
+- **🟢 Free Slots View**: Switch to **"🟢 Slot liberi"** mode to automatically compute time windows (≥ 30 min) during the week when **everyone** in the group has no lectures — perfect for finding study breaks or meeting times.
+- **👥 One-Tap Group Links**: Click **🔗 Condividi** to generate a link (e.g. `/?group=K9X2P4,W3M7R2`) so an entire study group can load all friends at once. All profiles in the group are fetched in parallel for speed.
 
 ### 6. 📱 iOS & Mobile Optimizations
 - **Safe Area Inset Support**: Fully accounts for iPhone notch, Dynamic Island, and home indicator bars (`env(safe-area-inset-top)` and `env(safe-area-inset-bottom)`).

@@ -1601,3 +1601,62 @@ body {
   border-radius: 50%;
   flex-shrink: 0;
 }
+
+/* ── Friends view: shared event card (me variant) ── */
+.shared-event-card--me {
+  background: rgba(45, 212, 191, 0.06);
+}
+
+/* ── Free Slots view ──────────────────────────────── */
+.free-slots-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: rgba(45, 212, 191, 0.08);
+  border: 1px solid rgba(45, 212, 191, 0.25);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.free-slots-day-header {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 8px 0 4px;
+  border-top: 1px solid var(--border-color);
+  margin-top: 8px;
+}
+
+.free-slot-card {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+
+.free-slot-time {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--accent-green);
+}
+
+.free-slot-duration {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.free-slots-banner {
+  text-align: center;
+  padding: 30px 16px;
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  border-radius: 12px;
+  color: var(--text-primary);
+}
