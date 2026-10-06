@@ -31,6 +31,7 @@
         </div>
       </div>
       <div class="header-actions">
+        <button id="btnExportCalendar" class="btn-icon" title="Esporta calendario (.ics / .csv)">📥</button>
         <button id="btnProfile" class="btn-icon" title="Il tuo profilo">👤</button>
         <button id="btnSettings" class="btn-icon" title="Scegli corso di studio">⚙️</button>
       </div>
@@ -354,7 +355,10 @@
     <!-- Exams Summary -->
     <div id="examsSummaryBanner" class="rooms-summary-banner" style="display: none;">
       <div id="examsCountText" style="color:var(--text-primary); font-weight:600;">0 appelli trovati</div>
-      <button id="btnRefreshExams" class="btn-secondary" style="width:auto; padding:4px 10px; font-size:0.75rem;">🔄 Ricarica</button>
+      <div style="display:flex; gap:6px;">
+        <button id="btnExportAllExams" class="btn-secondary" style="width:auto; padding:4px 10px; font-size:0.75rem;">📥 Esporta (.ics / .csv)</button>
+        <button id="btnRefreshExams" class="btn-secondary" style="width:auto; padding:4px 10px; font-size:0.75rem;">🔄 Ricarica</button>
+      </div>
     </div>
 
     <!-- Exams Spinner -->
@@ -410,6 +414,7 @@
           <p id="friendsGroupSubtitle" style="font-size:0.78rem; color:var(--text-secondary); margin:0;">Confronta i vostri orari e trovate i momenti liberi in comune</p>
         </div>
         <div style="display:flex; gap:8px;">
+          <button id="btnExportFriendsGroup" class="btn-secondary" style="width:auto; padding:8px 12px; font-size:0.82rem; white-space:nowrap;" title="Esporta calendario gruppo (.ics / .csv)">📥 Esporta</button>
           <button id="btnShareFriendsGroup" class="btn-secondary" style="width:auto; padding:8px 12px; font-size:0.82rem; white-space:nowrap;" title="Condividi link gruppo con amici">🔗 Condividi</button>
           <button id="btnAddFriend" class="btn-primary" style="width:auto; padding:8px 14px; font-size:0.82rem; white-space:nowrap;">+ Aggiungi</button>
         </div>
@@ -496,6 +501,74 @@
       <div class="share-actions">
         <button id="btnCopyShare" class="btn-primary">📋 Copia link</button>
         <button id="btnNativeShare" class="btn-secondary">📤 Condividi…</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export Calendar Modal (iCal, CSV, JSON, WebCal) -->
+  <div id="exportModal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 480px; text-align: left;">
+      <div class="modal-header">
+        <div>
+          <h3 style="font-size:1.15rem; color:#FFF; margin:0 0 2px;">📥 Esporta Calendario</h3>
+          <p id="exportModalSubtitle" style="font-size:0.8rem; color:var(--text-secondary); margin:0;">Esporta nei formati standard per le tue app di calendario</p>
+        </div>
+        <button id="btnCloseExportModal" class="btn-icon" style="width:30px; height:30px;">✕</button>
+      </div>
+
+      <!-- Export Scope Selector -->
+      <div id="exportScopeGroup" class="form-field" style="margin-top:14px;">
+        <label>Ambito temporale</label>
+        <div class="toggle-group">
+          <button id="btnExportScopeWeek" class="toggle-btn active" type="button">📅 Settimana corrente</button>
+          <button id="btnExportScopeMonth" class="toggle-btn" type="button">🗓️ Prossime 4 settimane</button>
+        </div>
+      </div>
+
+      <!-- Filter Selection (Target courses vs All) -->
+      <div id="exportFilterGroup" class="form-field" style="margin-top:10px;">
+        <label>Corsi da includere</label>
+        <div class="toggle-group">
+          <button id="btnExportFilterTarget" class="toggle-btn active" type="button">⭐ Solo corsi seguiti</button>
+          <button id="btnExportFilterAll" class="toggle-btn" type="button">📚 Tutti i corsi</button>
+        </div>
+      </div>
+
+      <!-- Action Buttons: Standard Formats -->
+      <div style="margin-top:16px;">
+        <label style="font-size:0.78rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; margin-bottom:8px; display:block;">Scarica file standard</label>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <button id="btnDownloadIcs" class="btn-primary" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:12px; font-size:0.9rem;">
+            📅 iCalendar (.ics) <span style="font-size:0.75rem; opacity:0.85;">(Apple Calendar, Google, Outlook)</span>
+          </button>
+          <button id="btnDownloadCsv" class="btn-secondary" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:10px; font-size:0.85rem;">
+            📊 Foglio di calcolo (.csv) <span style="font-size:0.75rem; opacity:0.85;">(Excel, Google Fogli)</span>
+          </button>
+          <button id="btnDownloadJson" class="btn-secondary" style="display:flex; align-items:center; justify-content:center; gap:8px; padding:10px; font-size:0.85rem;">
+            📋 Dati strutturati (.json)
+          </button>
+        </div>
+      </div>
+
+      <!-- Live WebCal Subscription Card -->
+      <div id="exportWebCalBox" style="margin-top:18px; padding:12px 14px; background:rgba(139,92,246,0.12); border:1px solid rgba(139,92,246,0.3); border-radius:12px;">
+        <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+          <span style="font-size:1.1rem;">🔄</span>
+          <strong style="font-size:0.88rem; color:#FFF;">Sottoscrizione Live (WebCal)</strong>
+        </div>
+        <p style="font-size:0.78rem; color:var(--text-secondary); line-height:1.4; margin-bottom:10px;">
+          Aggiungi questo link ad Apple Calendar, Google Calendar o Outlook per aggiornare automaticamente gli orari sul tuo telefono quando cambiano le aule.
+        </p>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <input type="text" id="exportWebCalUrl" readonly
+                 style="flex:1; padding:8px 10px; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid var(--border-color); color:var(--text-primary); font-size:0.75rem; outline:none; font-family:monospace;">
+          <button id="btnCopyWebCal" class="btn-secondary" style="width:auto; padding:8px 12px; font-size:0.78rem; white-space:nowrap;">📋 Copia</button>
+        </div>
+        <div style="margin-top:8px; text-align:right;">
+          <a id="btnSubscribeNativeCal" href="#" class="btn-secondary" style="display:inline-block; width:auto; padding:6px 12px; font-size:0.78rem; text-decoration:none;">
+            📲 Sottoscrivi in Apple / Google Calendar
+          </a>
+        </div>
       </div>
     </div>
   </div>

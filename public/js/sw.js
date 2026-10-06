@@ -1,4 +1,4 @@
-const CACHE_NAME = 'unimib-calendar-v17';
+const CACHE_NAME = 'unimib-calendar-v18';
 const ASSETS = [
   '/',
   '/css/style.css',

@@ -10,6 +10,10 @@
       "destination": "/api/calendar.py"
     },
     {
+      "source": "/api/export",
+      "destination": "/api/export.py"
+    },
+    {
       "source": "/api/rooms",
       "destination": "/api/rooms.py"
     },

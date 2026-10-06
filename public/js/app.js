@@ -587,6 +587,37 @@ function setupEventListeners() {
   document.getElementById('btnCopyShare').addEventListener('click', copyShareUrl);
   document.getElementById('btnNativeShare').addEventListener('click', nativeShare);
 
+  // Calendar Export
+  const btnExportCal = document.getElementById('btnExportCalendar');
+  if (btnExportCal) btnExportCal.addEventListener('click', () => openExportModal(state.activeTab || 'timetable'));
+  const btnExportFriends = document.getElementById('btnExportFriendsGroup');
+  if (btnExportFriends) btnExportFriends.addEventListener('click', () => openExportModal('friends'));
+  const btnExportExams = document.getElementById('btnExportAllExams');
+  if (btnExportExams) btnExportExams.addEventListener('click', () => openExportModal('exams'));
+
+  const btnCloseExport = document.getElementById('btnCloseExportModal');
+  if (btnCloseExport) btnCloseExport.addEventListener('click', closeExportModal);
+
+  const btnExpScopeWeek = document.getElementById('btnExportScopeWeek');
+  if (btnExpScopeWeek) btnExpScopeWeek.addEventListener('click', () => setExportScope('week'));
+  const btnExpScopeMonth = document.getElementById('btnExportScopeMonth');
+  if (btnExpScopeMonth) btnExpScopeMonth.addEventListener('click', () => setExportScope('month'));
+
+  const btnExpFiltTarget = document.getElementById('btnExportFilterTarget');
+  if (btnExpFiltTarget) btnExpFiltTarget.addEventListener('click', () => setExportFilter('target'));
+  const btnExpFiltAll = document.getElementById('btnExportFilterAll');
+  if (btnExpFiltAll) btnExpFiltAll.addEventListener('click', () => setExportFilter('all'));
+
+  const btnDlIcs = document.getElementById('btnDownloadIcs');
+  if (btnDlIcs) btnDlIcs.addEventListener('click', () => handleExportDownload('ics'));
+  const btnDlCsv = document.getElementById('btnDownloadCsv');
+  if (btnDlCsv) btnDlCsv.addEventListener('click', () => handleExportDownload('csv'));
+  const btnDlJson = document.getElementById('btnDownloadJson');
+  if (btnDlJson) btnDlJson.addEventListener('click', () => handleExportDownload('json'));
+
+  const btnCpWebCal = document.getElementById('btnCopyWebCal');
+  if (btnCpWebCal) btnCpWebCal.addEventListener('click', copyWebCalUrl);
+
   // Shared config preview
   document.getElementById('btnImportShared').addEventListener('click', importShared);
   document.getElementById('btnExitPreview').addEventListener('click', exitPreview);
@@ -835,6 +866,374 @@ async function nativeShare() {
   } catch (err) {
     if (err.name !== 'AbortError') showToast('Condivisione non riuscita.');
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  STANDARD CALENDAR EXPORT (.ICS, .CSV, .JSON, WEBCAL)
+// ══════════════════════════════════════════════════════════════
+
+let exportState = {
+  source: 'timetable', // 'timetable' | 'friends' | 'exams'
+  scope: 'week',       // 'week' | 'month'
+  filter: 'target'     // 'target' | 'all'
+};
+
+function openExportModal(source = 'timetable') {
+  exportState.source = source;
+  const modal = document.getElementById('exportModal');
+  if (!modal) return;
+
+  const subtitle = document.getElementById('exportModalSubtitle');
+  const scopeGroup = document.getElementById('exportScopeGroup');
+  const filterGroup = document.getElementById('exportFilterGroup');
+  const webCalBox = document.getElementById('exportWebCalBox');
+
+  if (source === 'timetable') {
+    if (subtitle) subtitle.textContent = state.config
+      ? `Esporta orario lezioni di ${state.config.corsoLabel || 'corso'}`
+      : 'Esporta orario lezioni';
+    if (scopeGroup) scopeGroup.style.display = '';
+    if (filterGroup) filterGroup.style.display = '';
+    if (webCalBox) webCalBox.style.display = '';
+  } else if (source === 'friends') {
+    const groupName = (friendsState.groupInfo && friendsState.groupInfo.name) || 'Gruppo Studio';
+    if (subtitle) subtitle.textContent = `Esporta orario del gruppo "${groupName}"`;
+    if (scopeGroup) scopeGroup.style.display = '';
+    if (filterGroup) filterGroup.style.display = 'none';
+    if (webCalBox) webCalBox.style.display = 'none';
+  } else if (source === 'exams') {
+    if (subtitle) subtitle.textContent = 'Esporta calendario appelli d\'esame';
+    if (scopeGroup) scopeGroup.style.display = 'none';
+    if (filterGroup) filterGroup.style.display = 'none';
+    if (webCalBox) webCalBox.style.display = 'none';
+  }
+
+  setExportScope('week');
+  setExportFilter('target');
+  updateWebCalUrl();
+
+  modal.classList.add('active');
+}
+
+function closeExportModal() {
+  const modal = document.getElementById('exportModal');
+  if (modal) modal.classList.remove('active');
+}
+
+function setExportScope(scope) {
+  exportState.scope = scope;
+  const btnWeek = document.getElementById('btnExportScopeWeek');
+  const btnMonth = document.getElementById('btnExportScopeMonth');
+  if (btnWeek) btnWeek.classList.toggle('active', scope === 'week');
+  if (btnMonth) btnMonth.classList.toggle('active', scope === 'month');
+  updateWebCalUrl();
+}
+
+function setExportFilter(filter) {
+  exportState.filter = filter;
+  const btnTarget = document.getElementById('btnExportFilterTarget');
+  const btnAll = document.getElementById('btnExportFilterAll');
+  if (btnTarget) btnTarget.classList.toggle('active', filter === 'target');
+  if (btnAll) btnAll.classList.toggle('active', filter === 'all');
+  updateWebCalUrl();
+}
+
+function updateWebCalUrl() {
+  const input = document.getElementById('exportWebCalUrl');
+  const subLink = document.getElementById('btnSubscribeNativeCal');
+  if (!input) return;
+
+  const origin = window.location.origin;
+  let url = '';
+
+  if (profileState.shareCode) {
+    url = `${origin}/api/export?code=${encodeURIComponent(profileState.shareCode)}&format=ics`;
+    if (exportState.filter === 'all') url += '&filter=all';
+  } else if (state.config) {
+    const cfg = state.config;
+    const params = new URLSearchParams({
+      anno: cfg.anno,
+      corso: cfg.corso,
+      format: 'ics'
+    });
+    (cfg.anni || []).forEach(a => params.append('anno2', a));
+    const favs = (cfg.favorites || []).map(f => f.code).filter(Boolean);
+    if (favs.length && exportState.filter !== 'all') params.set('fav', favs.join(','));
+    url = `${origin}/api/export?${params.toString()}`;
+  } else {
+    url = `${origin}/api/export`;
+  }
+
+  input.value = url;
+  if (subLink) {
+    const webcalUrl = url.replace(/^https?:\/\//i, 'webcal://');
+    subLink.href = webcalUrl;
+  }
+}
+
+async function copyWebCalUrl() {
+  const input = document.getElementById('exportWebCalUrl');
+  if (!input || !input.value) return;
+  const url = input.value;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(url);
+    } else if (!legacyCopy(url)) {
+      throw new Error('Copy command failed');
+    }
+    showToast('Link sottoscrizione copiato! 📋 Aggiungilo a Calendar');
+  } catch (e) {
+    input.select();
+    showToast('Premi Ctrl+C per copiare il link.');
+  }
+}
+
+async function handleExportDownload(format = 'ics') {
+  const btn = document.getElementById(`btnDownload${format.charAt(0).toUpperCase() + format.slice(1)}`);
+  const oldText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Generazione file...'; }
+
+  try {
+    if (exportState.source === 'exams') {
+      const exams = (examsState.allExams || []).filter(ex => {
+        if (examsState.filterMode === 'target' && typeof isExamCourseTracked === 'function') {
+          return isExamCourseTracked(ex.course_code);
+        }
+        return true;
+      });
+      if (!exams.length) {
+        showToast('Nessun appello trovato da esportare.');
+        return;
+      }
+      const events = exams.map(ex => ({
+        id: `exam-${ex.id || ex.date + '-' + ex.name}`,
+        course: `Esame: ${ex.name}`,
+        course_code: ex.course_code || '',
+        date: ex.date,
+        start_time: ex.time || '09:00',
+        end_time: ex.end_time || (ex.time ? addHoursToTime(ex.time, 2) : '11:00'),
+        aula: ex.classroom || ex.building || 'UNIMIB',
+        docente: ex.professor || '',
+        type: 'Appello d\'esame',
+        notes: ex.notes || ''
+      }));
+
+      const filename = `appelli_esami_${formatDateIso(new Date())}.${format}`;
+      if (format === 'ics') {
+        const ics = generateIcs(events, 'Appelli d\'Esame UNIMIB');
+        downloadFile(ics, 'text/calendar;charset=utf-8', filename);
+      } else if (format === 'csv') {
+        const csv = generateCsv(events);
+        downloadFile(csv, 'text/csv;charset=utf-8', filename);
+      } else if (format === 'json') {
+        downloadFile(JSON.stringify(events, null, 2), 'application/json;charset=utf-8', filename);
+      }
+      showToast(`Esportati ${events.length} appelli in .${format}! 📝`);
+      closeExportModal();
+      return;
+    }
+
+    if (exportState.source === 'friends') {
+      let events = [];
+      if (friendsState.events && friendsState.events.length) {
+        events = events.concat(friendsState.events);
+      }
+      if (friendsState.showMyself && friendsState.myEvents && friendsState.myEvents.length) {
+        events = events.concat(friendsState.myEvents);
+      }
+      if (!events.length) {
+        showToast('Nessuna lezione trovata da esportare nel gruppo.');
+        return;
+      }
+      const groupTitle = (friendsState.groupInfo && friendsState.groupInfo.name) || 'Gruppo UNIMIB';
+      const filename = `gruppo_${groupTitle.replace(/[^a-zA-Z0-9]/g, '_')}_${formatDateIso(new Date())}.${format}`;
+      if (format === 'ics') {
+        const ics = generateIcs(events, groupTitle);
+        downloadFile(ics, 'text/calendar;charset=utf-8', filename);
+      } else if (format === 'csv') {
+        const csv = generateCsv(events);
+        downloadFile(csv, 'text/csv;charset=utf-8', filename);
+      } else if (format === 'json') {
+        downloadFile(JSON.stringify(events, null, 2), 'application/json;charset=utf-8', filename);
+      }
+      showToast(`Esportate ${events.length} lezioni in .${format}! 👥`);
+      closeExportModal();
+      return;
+    }
+
+    // Source === 'timetable'
+    if (!state.config) {
+      showToast('Seleziona prima il tuo corso di studi.');
+      return;
+    }
+
+    if (exportState.scope === 'month') {
+      let exportUrl = '';
+      if (profileState.shareCode) {
+        exportUrl = `/api/export?code=${encodeURIComponent(profileState.shareCode)}&format=${format}&weeks=4`;
+        if (exportState.filter === 'all') exportUrl += '&filter=all';
+      } else {
+        const cfg = state.config;
+        const params = new URLSearchParams({
+          anno: cfg.anno,
+          corso: cfg.corso,
+          format: format,
+          weeks: '4',
+          date: state.currentMonday || ''
+        });
+        (cfg.anni || []).forEach(a => params.append('anno2', a));
+        if (exportState.filter !== 'all') {
+          const favs = (cfg.favorites || []).map(f => f.code).filter(Boolean);
+          if (favs.length) params.set('fav', favs.join(','));
+        } else {
+          params.set('filter', 'all');
+        }
+        exportUrl = `/api/export?${params.toString()}`;
+      }
+
+      const resp = await fetch(exportUrl);
+      if (!resp.ok) throw new Error('Errore durante la generazione dell\'esportazione');
+      const blob = await resp.blob();
+      const mime = format === 'ics' ? 'text/calendar;charset=utf-8' : (format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json');
+      const filename = `orario_unimib_4settimane.${format}`;
+      downloadFile(blob, mime, filename);
+      showToast(`Calendario (4 settimane) esportato in .${format}! 📅`);
+      closeExportModal();
+      return;
+    }
+
+    // Single week timetable export (instant client-side)
+    let evs = (state.calendarData && state.calendarData.events) || [];
+    if (exportState.filter === 'target' && state.config && state.config.favorites && state.config.favorites.length) {
+      evs = evs.filter(isFavorite);
+    }
+    if (!evs.length) {
+      showToast('Nessuna lezione trovata nella settimana selezionata.');
+      return;
+    }
+
+    const courseLabel = (state.config && state.config.corsoLabel) || 'lezione';
+    const filename = `orario_${courseLabel.replace(/[^a-zA-Z0-9]/g, '_')}_${state.currentMonday}.${format}`;
+
+    if (format === 'ics') {
+      const ics = generateIcs(evs, `UNIMIB - ${courseLabel}`);
+      downloadFile(ics, 'text/calendar;charset=utf-8', filename);
+    } else if (format === 'csv') {
+      const csv = generateCsv(evs);
+      downloadFile(csv, 'text/csv;charset=utf-8', filename);
+    } else if (format === 'json') {
+      downloadFile(JSON.stringify(evs, null, 2), 'application/json;charset=utf-8', filename);
+    }
+    showToast(`Settimana esportata in .${format}! 📅`);
+    closeExportModal();
+  } catch (err) {
+    console.error('Export error:', err);
+    showToast('Errore durante l\'esportazione.');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = oldText; }
+  }
+}
+
+function addHoursToTime(timeStr, hours) {
+  const parts = (timeStr || '09:00').split(':').map(Number);
+  const h = Math.min(23, (parts[0] || 0) + hours);
+  const m = parts[1] || 0;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function generateIcs(events, calendarName = 'UNIMIB Orari') {
+  const nowStamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const escapeIcs = (str) => (str || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+
+  const vEvents = events.map(ev => {
+    const rawDate = (ev.date || '').replace(/\//g, '-').trim();
+    const parts = rawDate.split('-');
+    if (parts.length !== 3) return '';
+    const dateClean = parts[0].length === 4 ? `${parts[0]}${parts[1]}${parts[2]}` : `${parts[2]}${parts[1]}${parts[0]}`;
+    const startClean = (ev.start_time || '09:00').replace(':', '').padEnd(4, '0') + '00';
+    const endClean = (ev.end_time || '11:00').replace(':', '').padEnd(4, '0') + '00';
+    const dtStart = `${dateClean}T${startClean}`;
+    const dtEnd = `${dateClean}T${endClean}`;
+    const summary = ev.course || ev.name || 'Lezione';
+    const location = ev.aula || ev.classroom || 'UNIMIB';
+
+    let desc = [];
+    if (ev.docente || ev.professore) desc.push(`Docente: ${ev.docente || ev.professore}`);
+    if (ev.course_code) desc.push(`Codice: ${ev.course_code}`);
+    if (ev.type) desc.push(`Tipo: ${ev.type}`);
+    if (ev.notes) desc.push(`Note: ${ev.notes}`);
+    if (ev.profile_id && ev.nickname && ev.profile_id !== 'MY_SELF') desc.push(`Membro: ${ev.nickname}`);
+    const descStr = desc.join('\n');
+
+    return [
+      'BEGIN:VEVENT',
+      `UID:unimib-${ev.id || Math.random().toString(36).slice(2)}@unimib.it`,
+      `DTSTAMP:${nowStamp}`,
+      `DTSTART;TZID=Europe/Rome:${dtStart}`,
+      `DTEND;TZID=Europe/Rome:${dtEnd}`,
+      `SUMMARY:${escapeIcs(ev.is_canceled ? '[ANNULLATO] ' + summary : summary)}`,
+      `LOCATION:${escapeIcs(location)}`,
+      `DESCRIPTION:${escapeIcs(descStr)}`,
+      ev.is_canceled ? 'STATUS:CANCELLED' : 'STATUS:CONFIRMED',
+      'END:VEVENT'
+    ].join('\r\n');
+  }).filter(Boolean);
+
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//UNIMIB Orari//IT',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    `X-WR-CALNAME:${(calendarName || 'UNIMIB Orari').replace(/[,;]/g, ' ')}`,
+    'X-WR-TIMEZONE:Europe/Rome',
+    ...vEvents,
+    'END:VCALENDAR'
+  ].join('\r\n') + '\r\n';
+}
+
+function generateCsv(events) {
+  const rows = [
+    ['Subject', 'Start Date', 'Start Time', 'End Date', 'End Time', 'All Day Event', 'Description', 'Location']
+  ];
+  events.forEach(ev => {
+    const rawDate = (ev.date || '').replace(/\//g, '-').trim();
+    const parts = rawDate.split('-');
+    let isoDate = rawDate;
+    if (parts.length === 3) {
+      if (parts[2].length === 4) isoDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
+      else if (parts[0].length === 4) isoDate = `${parts[0]}-${parts[1]}-${parts[2]}`;
+    }
+    let desc = [];
+    if (ev.docente || ev.professore) desc.push(`Docente: ${ev.docente || ev.professore}`);
+    if (ev.course_code) desc.push(`Codice: ${ev.course_code}`);
+    if (ev.type) desc.push(`Tipo: ${ev.type}`);
+    if (ev.notes) desc.push(`Note: ${ev.notes}`);
+    if (ev.profile_id && ev.nickname && ev.profile_id !== 'MY_SELF') desc.push(`Membro: ${ev.nickname}`);
+    if (ev.is_canceled) desc.push('[ANNULLATO]');
+    rows.push([
+      ev.course || ev.name || 'Lezione',
+      isoDate,
+      ev.start_time || '09:00',
+      isoDate,
+      ev.end_time || '11:00',
+      'False',
+      desc.join(' | '),
+      ev.aula || ev.classroom || 'UNIMIB'
+    ]);
+  });
+  return '\uFEFF' + rows.map(r => r.map(f => `"${String(f || '').replace(/"/g, '""')}"`).join(',')).join('\r\n');
+}
+
+function downloadFile(content, mimeType, filename) {
+  const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
 // ---------- Setup modal (mirrors the UNIMIB "By degree" form dropdowns) ----------

@@ -786,6 +786,21 @@ class TestProfileEdgeCases(unittest.TestCase):
         self.assertEqual(len(evs_all), 2)
 
 
+    def test_export_helpers(self):
+        from api.export import _escape_ical, _format_ical_date, _format_csv_date, _parse_date_to_monday
+        self.assertEqual(_escape_ical("Hello, world; test"), r"Hello\, world\; test")
+        self.assertEqual(_format_ical_date("05-10-2026", "09:00"), "20261005T090000")
+        self.assertEqual(_format_ical_date("2026-10-05", "09:00"), "20261005T090000")
+        self.assertEqual(_format_ical_date("05/10/2026", "09:00"), "20261005T090000")
+        self.assertEqual(_format_csv_date("05-10-2026"), "2026-10-05")
+        self.assertEqual(_format_csv_date("2026-10-05"), "2026-10-05")
+        self.assertEqual(_format_csv_date("05/10/2026"), "2026-10-05")
+        m = _parse_date_to_monday("06-10-2026")
+        self.assertEqual(m.strftime("%d-%m-%Y"), "05-10-2026")
+        m_slash = _parse_date_to_monday("06/10/2026")
+        self.assertEqual(m_slash.strftime("%d-%m-%Y"), "05-10-2026")
+
+
 if __name__ == "__main__":
     unittest.main()
 
