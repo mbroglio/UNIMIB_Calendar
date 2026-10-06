@@ -50,6 +50,24 @@ let examsState = {
   isLoading: false
 };
 
+const FAVORITE_TEACHERS_KEY = 'unimib_favorite_teachers';
+
+let teachersState = {
+  academicYears: [],
+  selectedYear: '',
+  allTeachers: [],       // [{code, name, courses: [...]}]
+  favoriteTeachers: [],  // [{code, name}]
+  selectedTeacher: null, // {code, name, courses: [...]}
+  selectedCourseFilter: '', // '' for all courses of teacher, or course code
+  currentMonday: null,
+  selectedDayDate: 'all', // 'all' or 'DD-MM-YYYY'
+  viewMode: 'week',      // 'week' or 'all' (all events of semester)
+  searchFilter: '',      // in-schedule query
+  eventsData: null,      // { events: [...], giorni: [...], week_label: '...' }
+  isLoading: false,
+  requestId: 0
+};
+
 // Profile state: private credentials (nickname + PIN) & public shareCode
 let profileState = {
   nickname:  '',
@@ -99,6 +117,8 @@ function initApp() {
   initProfile();
   friendsState.friends = loadFriends();
   friendsState.currentMonday = formatFormattedDate(getMonday(new Date()));
+  teachersState.favoriteTeachers = loadFavoriteTeachers();
+  teachersState.currentMonday = formatFormattedDate(getMonday(new Date()));
 
   setupEventListeners();
   updateRoomsDateDisplay();
@@ -112,6 +132,8 @@ function initApp() {
   const urlParams = new URLSearchParams(window.location.search);
   const friendParam = urlParams.get('friend') || urlParams.get('share_cal');
   const groupParam = urlParams.get('group');
+  const teacherParam = urlParams.get('teacher') || urlParams.get('docente');
+  const tabParam = urlParams.get('tab');
 
   if (shared) {
     enterPreview(shared);
@@ -131,6 +153,21 @@ function initApp() {
       showWelcome();
     }
     handleSharedGroupUrl(groupParam);
+  } else if (teacherParam) {
+    if (state.config) {
+      applyConfig();
+    } else {
+      showWelcome();
+    }
+    switchTab('teachers');
+    handleTeacherParam(teacherParam);
+  } else if (tabParam === 'docenti' || tabParam === 'teachers') {
+    if (state.config) {
+      applyConfig();
+    } else {
+      showWelcome();
+    }
+    switchTab('teachers');
   } else if (state.config) {
     applyConfig();
     loadCalendar(state.currentMonday);
@@ -156,9 +193,12 @@ function registerServiceWorker() {
 function setupEventListeners() {
   // Navigation Tabs
   document.getElementById('tabTimetable').addEventListener('click', () => switchTab('timetable'));
+  document.getElementById('tabTeachers').addEventListener('click', () => switchTab('teachers'));
   document.getElementById('tabRooms').addEventListener('click', () => switchTab('rooms'));
   document.getElementById('tabExams').addEventListener('click', () => switchTab('exams'));
   document.getElementById('tabFriends').addEventListener('click', () => switchTab('friends'));
+
+  setupTeachersEventListeners();
 
   // Profile button
   document.getElementById('btnProfile').addEventListener('click', openProfileModal);
@@ -1464,15 +1504,16 @@ function isoToDisplayDate(iso) {
 
 // ---------- Tab Navigation Switcher ----------
 
- function switchTab(tabId) {
+function switchTab(tabId) {
   state.activeTab = tabId;
 
-  const tabMap = { timetable: 'tabTimetable', rooms: 'tabRooms', exams: 'tabExams', friends: 'tabFriends' };
+  const tabMap = { timetable: 'tabTimetable', teachers: 'tabTeachers', rooms: 'tabRooms', exams: 'tabExams', friends: 'tabFriends' };
   document.querySelectorAll('.bottom-nav .nav-tab').forEach(btn => {
     btn.classList.toggle('active', btn.id === tabMap[tabId]);
   });
 
   document.getElementById('viewTimetable').classList.toggle('hidden', tabId !== 'timetable');
+  document.getElementById('viewTeachers').classList.toggle('hidden', tabId !== 'teachers');
   document.getElementById('viewRooms').classList.toggle('hidden', tabId !== 'rooms');
   document.getElementById('viewExams').classList.toggle('hidden', tabId !== 'exams');
   document.getElementById('viewFriends').classList.toggle('hidden', tabId !== 'friends');
@@ -1485,6 +1526,11 @@ function isoToDisplayDate(iso) {
     document.getElementById('headerSubtitle').textContent = state.config 
       ? `${state.config.corsoLabel} · ${state.config.anniLabels.join(', ')}` 
       : 'Seleziona il tuo corso';
+  } else if (tabId === 'teachers') {
+    document.getElementById('headerSubtitle').textContent = teachersState.selectedTeacher
+      ? `Prof. ${teachersState.selectedTeacher.name}`
+      : 'Calendario docenti';
+    initTeachersView();
   } else if (tabId === 'rooms') {
     document.getElementById('headerSubtitle').textContent = 'Occupazione aule in tempo reale';
     if (!roomsState.buildings.length) {
@@ -1499,6 +1545,887 @@ function isoToDisplayDate(iso) {
     document.getElementById('headerSubtitle').textContent = 'Calendario condiviso amici';
     renderFriendChips();
     loadFriendsCalendar();
+  }
+}
+
+// ---------- Teachers Calendar (Calendario Docenti) ----------
+
+function loadFavoriteTeachers() {
+  try {
+    const raw = localStorage.getItem(FAVORITE_TEACHERS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    console.warn('Error reading favorite teachers', e);
+    return [];
+  }
+}
+
+function saveFavoriteTeachers(favs) {
+  try {
+    localStorage.setItem(FAVORITE_TEACHERS_KEY, JSON.stringify(favs));
+  } catch (e) {
+    console.warn('Error saving favorite teachers', e);
+  }
+}
+
+async function initTeachersView() {
+  renderFavoriteTeachersBar();
+  renderTeacherQuickSuggestions();
+
+  if (!teachersState.academicYears.length) {
+    await loadTeacherYears();
+  }
+
+  if (!teachersState.allTeachers.length && teachersState.selectedYear) {
+    await loadTeachersList();
+  }
+
+  if (teachersState.selectedTeacher) {
+    loadTeacherCalendar();
+  } else {
+    // Show empty state
+    const emptyState = document.getElementById('teachersEmptyState');
+    const eventsContainer = document.getElementById('teachersEventsContainer');
+    if (emptyState) emptyState.style.display = 'block';
+    if (eventsContainer) eventsContainer.style.display = 'none';
+  }
+}
+
+async function loadTeacherYears() {
+  try {
+    const res = await fetchJson('/api/options');
+    teachersState.academicYears = res.academic_years || [];
+    const select = document.getElementById('teachersYearSelect');
+    if (select) {
+      select.innerHTML = teachersState.academicYears.map(y =>
+        `<option value="${escapeHtml(y.value)}" ${y.value === teachersState.selectedYear ? 'selected' : ''}>${escapeHtml(y.label)}</option>`
+      ).join('');
+      if (!teachersState.selectedYear && teachersState.academicYears.length > 0) {
+        teachersState.selectedYear = teachersState.academicYears[0].value;
+        select.value = teachersState.selectedYear;
+      }
+    }
+  } catch (e) {
+    console.warn('Error loading academic years for teachers', e);
+  }
+}
+
+async function loadTeachersList(force = false) {
+  if (!teachersState.selectedYear) return;
+  const input = document.getElementById('teachersSearchInput');
+  if (input && !teachersState.allTeachers.length) {
+    input.placeholder = 'Caricamento elenco docenti da UNIMIB...';
+  }
+
+  try {
+    const res = await fetchJson(`/api/teachers?anno=${encodeURIComponent(teachersState.selectedYear)}${force ? '&refresh=1' : ''}`);
+    teachersState.allTeachers = res.teachers || [];
+  } catch (e) {
+    console.error('Error loading teachers list', e);
+    showToast('Errore nel caricamento dei docenti UNIMIB');
+  } finally {
+    if (input) {
+      input.placeholder = '🔍 Cerca docente (es. Abbotto, Arcelli, Antoniotti)...';
+    }
+  }
+}
+
+function normalizeSearchText(str) {
+  if (!str) return '';
+  return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+function renderTeacherAutocomplete(query) {
+  const container = document.getElementById('teachersAutocompleteList');
+  if (!container) return;
+
+  const q = normalizeSearchText(query);
+  if (!q || q.length < 2) {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+
+  const matches = teachersState.allTeachers.filter(t => {
+    const nameNorm = normalizeSearchText(t.name);
+    if (nameNorm.includes(q)) return true;
+    return (t.courses || []).some(c => 
+      normalizeSearchText(c.name).includes(q) || normalizeSearchText(c.code).includes(q)
+    );
+  }).slice(0, 20);
+
+  if (!matches.length) {
+    container.innerHTML = `
+      <div style="padding: 12px 14px; color: var(--text-muted); font-size: 0.82rem; text-align: center;">
+        Nessun docente trovato per "<strong>${escapeHtml(query)}</strong>"
+      </div>
+    `;
+    container.style.display = 'block';
+    return;
+  }
+
+  container.innerHTML = '';
+  matches.forEach((t, idx) => {
+    const item = document.createElement('div');
+    item.className = 'teachers-autocomplete-item';
+    if (idx === 0) item.classList.add('active');
+
+    const isFav = teachersState.favoriteTeachers.some(f => f.code === t.code);
+    const coursesSummary = (t.courses || []).map(c => c.name).slice(0, 2).join(' · ');
+
+    item.innerHTML = `
+      <div class="teacher-item-name">
+        <span>👨‍🏫 ${escapeHtml(t.name)}</span>
+        ${isFav ? '<span title="Docente preferito">⭐</span>' : ''}
+      </div>
+      ${coursesSummary ? `<div class="teacher-item-courses">${escapeHtml(coursesSummary)}</div>` : ''}
+    `;
+
+    item.addEventListener('click', () => {
+      selectTeacher(t);
+    });
+
+    container.appendChild(item);
+  });
+
+  container.style.display = 'block';
+}
+
+function selectTeacher(teacher, autoFetch = true) {
+  if (!teacher) return;
+  teachersState.selectedTeacher = teacher;
+  teachersState.selectedCourseFilter = '';
+
+  const input = document.getElementById('teachersSearchInput');
+  if (input) input.value = teacher.name;
+
+  const btnClear = document.getElementById('btnClearTeacherSearch');
+  if (btnClear) btnClear.style.display = 'block';
+
+  const dropdown = document.getElementById('teachersAutocompleteList');
+  if (dropdown) dropdown.style.display = 'none';
+
+  // Update selected teacher card
+  const card = document.getElementById('selectedTeacherCard');
+  if (card) {
+    card.style.display = 'block';
+    document.getElementById('selectedTeacherName').textContent = teacher.name;
+
+    const emailContainer = document.getElementById('selectedTeacherEmails');
+    if (emailContainer) emailContainer.innerHTML = '';
+
+    // Update favorite button icon
+    const isFav = teachersState.favoriteTeachers.some(f => f.code === teacher.code);
+    const favBtn = document.getElementById('btnToggleTeacherFavorite');
+    if (favBtn) {
+      favBtn.textContent = isFav ? '⭐' : '☆';
+      favBtn.title = isFav ? 'Rimuovi dai preferiti' : 'Salva tra i preferiti';
+    }
+
+    // Populate course filter
+    const courseFilterContainer = document.getElementById('teacherCourseFilterContainer');
+    const courseSelect = document.getElementById('teacherCourseSelect');
+    if (courseFilterContainer && courseSelect) {
+      if (teacher.courses && teacher.courses.length > 1) {
+        courseFilterContainer.style.display = 'block';
+        courseSelect.innerHTML = `<option value="">📚 Tutti i corsi del docente (${teacher.courses.length})</option>` +
+          teacher.courses.map(c => `<option value="${escapeHtml(c.code)}">${escapeHtml(c.name)}</option>`).join('');
+      } else {
+        courseFilterContainer.style.display = 'none';
+        courseSelect.innerHTML = '<option value="">📚 Tutti i corsi del docente</option>';
+      }
+    }
+  }
+
+  // Update header subtitle
+  if (state.activeTab === 'teachers') {
+    document.getElementById('headerSubtitle').textContent = `Prof. ${teacher.name}`;
+  }
+
+  // Update active chip state in favorites bar
+  renderFavoriteTeachersBar();
+
+  if (autoFetch) {
+    loadTeacherCalendar();
+  }
+}
+
+async function handleTeacherParam(teacherCode) {
+  if (!teacherCode) return;
+  const cleanCode = teacherCode.trim();
+
+  // If teachers not loaded yet, wait for years and list
+  if (!teachersState.academicYears.length) {
+    await loadTeacherYears();
+  }
+  if (!teachersState.allTeachers.length && teachersState.selectedYear) {
+    await loadTeachersList();
+  }
+
+  // Try finding in allTeachers
+  let found = teachersState.allTeachers.find(t => t.code === cleanCode || t.name.toLowerCase() === cleanCode.toLowerCase());
+  if (found) {
+    selectTeacher(found, true);
+  } else {
+    // Direct fetch using the code
+    selectTeacher({ code: cleanCode, name: `Docente (${cleanCode})`, courses: [] }, true);
+  }
+}
+
+function toggleTeacherFavorite(teacher) {
+  if (!teacher) return;
+  const exists = teachersState.favoriteTeachers.some(f => f.code === teacher.code);
+  if (exists) {
+    teachersState.favoriteTeachers = teachersState.favoriteTeachers.filter(f => f.code !== teacher.code);
+    showToast('Docente rimosso dai preferiti');
+  } else {
+    teachersState.favoriteTeachers.push({ code: teacher.code, name: teacher.name });
+    showToast('Docente salvato nei preferiti ⭐');
+  }
+  saveFavoriteTeachers(teachersState.favoriteTeachers);
+
+  // Update button
+  const favBtn = document.getElementById('btnToggleTeacherFavorite');
+  if (favBtn) {
+    const isNowFav = !exists;
+    favBtn.textContent = isNowFav ? '⭐' : '☆';
+    favBtn.title = isNowFav ? 'Rimuovi dai preferiti' : 'Salva tra i preferiti';
+  }
+
+  renderFavoriteTeachersBar();
+}
+
+function renderFavoriteTeachersBar() {
+  const section = document.getElementById('teachersFavoritesSection');
+  const container = document.getElementById('teachersFavoritesList');
+  if (!section || !container) return;
+
+  if (!teachersState.favoriteTeachers.length) {
+    section.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+
+  section.style.display = 'block';
+  container.innerHTML = '';
+
+  teachersState.favoriteTeachers.forEach(fav => {
+    const chip = document.createElement('div');
+    const isSelected = teachersState.selectedTeacher && teachersState.selectedTeacher.code === fav.code;
+    chip.className = `teacher-favorite-chip ${isSelected ? 'active' : ''}`;
+
+    // Format shorter label, e.g. "Abbotto A."
+    const parts = fav.name.split(' ');
+    const shortName = parts.length > 1 ? `${parts[0]} ${parts[1][0]}.` : fav.name;
+
+    chip.innerHTML = `<span>⭐ ${escapeHtml(shortName)}</span>`;
+    chip.title = fav.name;
+    chip.addEventListener('click', () => {
+      // Find full teacher object if available
+      const full = teachersState.allTeachers.find(t => t.code === fav.code) || fav;
+      selectTeacher(full, true);
+    });
+
+    container.appendChild(chip);
+  });
+}
+
+function renderTeacherQuickSuggestions() {
+  const container = document.getElementById('teachersQuickSuggestions');
+  if (!container) return;
+
+  const suggestions = [
+    { name: 'Abbotto Alessandro', code: '013696' },
+    { name: 'Arcelli Fontana Francesca', code: '000857' },
+    { name: 'Antoniotti Marco', code: '001919' },
+    { name: 'Bernardinello Luca', code: '000600' }
+  ];
+
+  container.innerHTML = suggestions.map(s => `
+    <button class="teacher-suggestion-chip" data-code="${escapeHtml(s.code)}" data-name="${escapeHtml(s.name)}">
+      🔍 ${escapeHtml(s.name)}
+    </button>
+  `).join('');
+
+  container.querySelectorAll('.teacher-suggestion-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const code = btn.getAttribute('data-code');
+      const name = btn.getAttribute('data-name');
+      const full = teachersState.allTeachers.find(t => t.code === code) || { code, name, courses: [] };
+      selectTeacher(full, true);
+    });
+  });
+}
+
+async function shareTeacherCalendar(teacher) {
+  if (!teacher) return;
+  const url = `${window.location.origin}/?tab=docenti&docente=${encodeURIComponent(teacher.code)}`;
+  const title = `Orario lezioni - Prof. ${teacher.name}`;
+  const text = `Consulta l'orario delle lezioni e le aule del Prof. ${teacher.name} su UNIMIB Orari`;
+
+  if (navigator.share) {
+    try {
+      await navigator.share({ title, text, url });
+      return;
+    } catch (e) {
+      if (e.name !== 'AbortError') console.warn('Share error', e);
+    }
+  }
+
+  // Fallback to clipboard
+  try {
+    await navigator.clipboard.writeText(url);
+    showToast('Link orario docente copiato! 📋');
+  } catch (e) {
+    showToast('Copia il link: ' + url);
+  }
+}
+
+async function loadTeacherCalendar(forceRefresh = false) {
+  if (!teachersState.selectedTeacher) {
+    const emptyState = document.getElementById('teachersEmptyState');
+    const eventsContainer = document.getElementById('teachersEventsContainer');
+    if (emptyState) emptyState.style.display = 'block';
+    if (eventsContainer) eventsContainer.style.display = 'none';
+    return;
+  }
+
+  const requestId = ++teachersState.requestId;
+  const spinner = document.getElementById('teachersSpinnerContainer');
+  const emptyState = document.getElementById('teachersEmptyState');
+  const eventsContainer = document.getElementById('teachersEventsContainer');
+
+  if (spinner) spinner.style.display = 'flex';
+  if (emptyState) emptyState.style.display = 'none';
+  if (eventsContainer) eventsContainer.style.display = 'none';
+
+  if (!teachersState.currentMonday) {
+    teachersState.currentMonday = formatFormattedDate(getMonday(new Date()));
+  }
+
+  const params = new URLSearchParams({
+    anno: teachersState.selectedYear || '',
+    docente: teachersState.selectedTeacher.code,
+    date: teachersState.currentMonday
+  });
+
+  if (teachersState.viewMode === 'all') {
+    params.set('all_events', '1');
+  }
+  if (teachersState.selectedCourseFilter) {
+    params.set('corso', teachersState.selectedCourseFilter);
+  }
+  if (forceRefresh) {
+    params.set('refresh', '1');
+  }
+
+  try {
+    const res = await fetchJson(`/api/teachers?${params.toString()}`);
+    if (requestId !== teachersState.requestId) return;
+
+    teachersState.eventsData = res;
+
+    // Check if events have email addresses for the selected teacher
+    if (res.events && res.events.length > 0) {
+      const emailContainer = document.getElementById('selectedTeacherEmails');
+      const allEmails = [];
+      res.events.forEach(e => {
+        (e.emails || []).forEach(em => {
+          if (!allEmails.includes(em)) allEmails.push(em);
+        });
+      });
+      if (allEmails.length > 0 && emailContainer) {
+        emailContainer.innerHTML = allEmails.map(em =>
+          `<a href="mailto:${escapeHtml(em)}" class="teacher-email-link" title="Scrivi email">✉️ ${escapeHtml(em)}</a>`
+        ).join(' ');
+      }
+    }
+
+    renderTeacherCalendar();
+  } catch (err) {
+    if (requestId !== teachersState.requestId) return;
+    console.error('Error fetching teacher calendar', err);
+    if (emptyState) {
+      emptyState.style.display = 'block';
+      document.getElementById('teachersEmptyTitle').textContent = 'Errore di caricamento';
+      document.getElementById('teachersEmptyDesc').textContent = 'Impossibile recuperare il calendario del docente. Verifica la connessione e riprova.';
+    }
+    showToast('Errore di connessione a UNIMIB');
+  } finally {
+    if (requestId === teachersState.requestId && spinner) {
+      spinner.style.display = 'none';
+    }
+  }
+}
+
+function changeTeacherWeek(dayOffset) {
+  if (!teachersState.currentMonday) return;
+  const parts = teachersState.currentMonday.split('-');
+  const dt = new Date(parts[2], parts[1] - 1, parts[0]);
+  dt.setDate(dt.getDate() + dayOffset);
+
+  const monday = getMonday(dt);
+  teachersState.currentMonday = formatFormattedDate(monday);
+  teachersState.selectedDayDate = 'all';
+  loadTeacherCalendar();
+}
+
+function renderTeacherCalendar() {
+  const data = teachersState.eventsData;
+  if (!data) return;
+
+  const weekLabel = document.getElementById('teachersWeekLabelText');
+  if (weekLabel) {
+    weekLabel.textContent = data.week_label || teachersState.currentMonday;
+  }
+
+  renderTeacherDayTabs();
+  renderTeacherEvents();
+}
+
+function renderTeacherDayTabs() {
+  const tabsContainer = document.getElementById('teachersDaysTabBar');
+  if (!tabsContainer) return;
+  tabsContainer.innerHTML = '';
+
+  const giorni = (teachersState.eventsData && teachersState.eventsData.giorni) || [];
+
+  // "TUTTI" Tab
+  const allTab = document.createElement('div');
+  allTab.className = `day-tab ${teachersState.selectedDayDate === 'all' ? 'active' : ''}`;
+  allTab.innerHTML = `
+    <div class="tab-name">TUTTI</div>
+    <div class="tab-date">${giorni.length > 0 ? giorni.length + 'GG' : 'TUTTI'}</div>
+  `;
+  allTab.addEventListener('click', () => {
+    teachersState.selectedDayDate = 'all';
+    renderTeacherDayTabs();
+    renderTeacherEvents();
+  });
+  tabsContainer.appendChild(allTab);
+
+  giorni.forEach(g => {
+    const tab = document.createElement('div');
+    const isSelected = teachersState.selectedDayDate === g.data;
+    tab.className = `day-tab ${isSelected ? 'active' : ''}`;
+
+    const dayShort = g.label ? g.label.split(' ')[0].substring(0, 3).toUpperCase() : 'GG';
+    const dayNum = g.data ? g.data.split('-')[0] : '';
+
+    const dayEvents = ((teachersState.eventsData && teachersState.eventsData.events) || []).filter(e => e.date === g.data);
+    let dotsHtml = '';
+    if (dayEvents.length > 0) {
+      dotsHtml = '<div class="tab-dots">';
+      for (let i = 0; i < Math.min(dayEvents.length, 3); i++) {
+        dotsHtml += '<div class="dot"></div>';
+      }
+      dotsHtml += '</div>';
+    }
+
+    tab.innerHTML = `
+      <div class="tab-name">${escapeHtml(dayShort)}</div>
+      <div class="tab-date">${escapeHtml(dayNum)}</div>
+      ${dotsHtml}
+    `;
+
+    tab.addEventListener('click', () => {
+      teachersState.selectedDayDate = g.data;
+      renderTeacherDayTabs();
+      renderTeacherEvents();
+    });
+
+    tabsContainer.appendChild(tab);
+  });
+}
+
+function renderTeacherEvents() {
+  const container = document.getElementById('teachersEventsContainer');
+  const emptyState = document.getElementById('teachersEmptyState');
+  if (!container) return;
+
+  container.innerHTML = '';
+
+  if (!teachersState.eventsData || !teachersState.eventsData.events) {
+    return;
+  }
+
+  let events = teachersState.eventsData.events;
+
+  // Filter 1: By day
+  if (teachersState.selectedDayDate !== 'all') {
+    events = events.filter(e => e.date === teachersState.selectedDayDate);
+  }
+
+  // Filter 2: By selected course of study
+  if (teachersState.selectedCourseFilter) {
+    events = events.filter(e => {
+      const codeMatch = (e.course_code || '').toLowerCase().includes(teachersState.selectedCourseFilter.toLowerCase());
+      const curriculaMatch = (e.curricula || []).some(c => c.toLowerCase().includes(teachersState.selectedCourseFilter.toLowerCase()));
+      return codeMatch || curriculaMatch;
+    });
+  }
+
+  // Filter 3: In-schedule search query
+  if (teachersState.searchFilter) {
+    const q = teachersState.searchFilter;
+    events = events.filter(e =>
+      (e.course || '').toLowerCase().includes(q) ||
+      (e.aula || '').toLowerCase().includes(q) ||
+      (e.notes || '').toLowerCase().includes(q) ||
+      (e.type || '').toLowerCase().includes(q)
+    );
+  }
+
+  if (events.length === 0) {
+    if (emptyState) {
+      emptyState.style.display = 'block';
+      document.getElementById('teachersEmptyTitle').textContent = 'Nessuna lezione trovata';
+      document.getElementById('teachersEmptyDesc').textContent = 'Nessuna lezione in programma per i filtri selezionati in questo periodo.';
+    }
+    container.style.display = 'none';
+    return;
+  }
+
+  if (emptyState) emptyState.style.display = 'none';
+  container.style.display = 'flex';
+  container.style.flexDirection = 'column';
+
+  // Export week toolbar
+  const topBar = document.createElement('div');
+  topBar.style.display = 'flex';
+  topBar.style.justifyContent = 'space-between';
+  topBar.style.alignItems = 'center';
+  topBar.style.padding = '8px 16px';
+  topBar.style.marginBottom = '8px';
+  topBar.innerHTML = `
+    <span style="font-size:0.82rem; color:var(--text-secondary); font-weight:600;">
+      📚 ${events.length} ${events.length === 1 ? 'lezione' : 'lezioni'}
+    </span>
+    <button id="btnExportTeacherWeekIcs" class="btn-ics-action" style="padding: 6px 12px; font-size: 0.78rem;">
+      📥 Esporta tutte (.ics)
+    </button>
+  `;
+  container.appendChild(topBar);
+
+  topBar.querySelector('#btnExportTeacherWeekIcs').addEventListener('click', () => {
+    downloadTeacherWeekIcs(events, teachersState.selectedTeacher);
+  });
+
+  // Group events by date
+  const grouped = {};
+  events.forEach(e => {
+    if (!grouped[e.date]) {
+      grouped[e.date] = {
+        date: e.date,
+        dayName: e.day_name,
+        items: []
+      };
+    }
+    grouped[e.date].items.push(e);
+  });
+
+  Object.keys(grouped).forEach(dateKey => {
+    const group = grouped[dateKey];
+    const section = document.createElement('div');
+    section.className = 'day-section';
+
+    const itDateTitle = formatDateItalianLong(group.date);
+    section.innerHTML = `<div class="day-header-title">📌 ${escapeHtml(itDateTitle)}</div>`;
+
+    group.items.forEach(e => {
+      const card = document.createElement('div');
+      const isCanceled = e.is_canceled;
+      card.className = `event-card ${isCanceled ? 'canceled' : ''}`;
+
+      card.innerHTML = `
+        <div class="card-top">
+          <span class="time-badge">⏰ ${escapeHtml(e.start_time)} - ${escapeHtml(e.end_time)}</span>
+          <span class="badge-status" style="font-size: 0.72rem; padding: 2px 8px;">${escapeHtml(e.type || 'Lezione')}</span>
+        </div>
+        ${isCanceled ? '<div class="canceled-banner">⚠️ LEZIONE ANNULLATA</div>' : ''}
+        <div class="course-title ${isCanceled ? 'canceled-text' : ''}">${escapeHtml(e.course)}</div>
+        <div class="card-details">
+          <div class="detail-item">
+            <span>📍</span>
+            <span>Aula: <strong class="room-pill">${escapeHtml(e.aula || 'Non specificata')}</strong></span>
+          </div>
+          ${(e.curricula && e.curricula.length > 0) ? `
+          <div class="detail-item">
+            <span>🎓</span>
+            <span>${escapeHtml(e.curricula.join(' · '))}</span>
+          </div>` : ''}
+          ${e.docente ? `
+          <div class="detail-item">
+            <span>👨‍🏫</span>
+            <span>${escapeHtml(e.docente)}</span>
+          </div>` : ''}
+          ${e.primary_email ? `
+          <div class="detail-item">
+            <span>✉️</span>
+            <a href="mailto:${escapeHtml(e.primary_email)}" class="teacher-email-link" title="Invia email">${escapeHtml(e.primary_email)}</a>
+          </div>` : ''}
+          ${e.notes ? `
+          <div class="detail-item" style="grid-column: 1 / -1; background: rgba(255,255,255,0.03); border-radius: 8px; padding: 6px 10px; margin-top: 4px;">
+            <span style="font-size: 0.8rem;">📝</span>
+            <span style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">${escapeHtml(e.notes)}</span>
+          </div>` : ''}
+        </div>
+        <div style="display: flex; justify-content: flex-end; margin-top: 10px; gap: 8px;">
+          <button class="btn-ics-action btn-single-ics">📅 Salva .ics</button>
+        </div>
+      `;
+
+      card.querySelector('.btn-single-ics').addEventListener('click', (evt) => {
+        evt.stopPropagation();
+        downloadTeacherEventIcs(e);
+      });
+
+      section.appendChild(card);
+    });
+
+    container.appendChild(section);
+  });
+}
+
+function downloadTeacherEventIcs(ev) {
+  if (!ev) return;
+  const parts = (ev.date || '').split('-');
+  if (parts.length !== 3) return;
+  const dateClean = `${parts[2]}${parts[1]}${parts[0]}`;
+  const startClean = (ev.start_time || '09:00').replace(':', '') + '00';
+  const endClean = (ev.end_time || '11:00').replace(':', '') + '00';
+  const dtStart = `${dateClean}T${startClean}`;
+  const dtEnd = `${dateClean}T${endClean}`;
+  const summary = `Lezione: ${ev.course}`;
+  const location = ev.aula || 'UNIMIB';
+  const description = `Docente: ${ev.docente || ''}\nAula: ${ev.aula || ''}\nTipo: ${ev.type || 'Lezione'}\nNote: ${ev.notes || ''}`;
+
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//UNIMIB Orari//IT',
+    'CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT',
+    `UID:teacher-lesson-${ev.id || Date.now()}@unimib.it`,
+    `DTSTAMP:${dateClean}T000000Z`,
+    `DTSTART:${dtStart}`,
+    `DTEND:${dtEnd}`,
+    `SUMMARY:${summary.replace(/,/g, '\\,')}`,
+    `LOCATION:${location.replace(/,/g, '\\,')}`,
+    `DESCRIPTION:${description.replace(/\n/g, '\\n').replace(/,/g, '\\,')}`,
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = `lezione_${ev.course.replace(/[^a-zA-Z0-9]/g, '_')}_${ev.date}.ics`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  showToast('Lezione salvata in .ics! 📅');
+}
+
+function downloadTeacherWeekIcs(events, teacher) {
+  if (!events || !events.length) return;
+
+  const nowStamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const vEvents = events.map(ev => {
+    const parts = (ev.date || '').split('-');
+    if (parts.length !== 3) return '';
+    const dateClean = `${parts[2]}${parts[1]}${parts[0]}`;
+    const startClean = (ev.start_time || '09:00').replace(':', '') + '00';
+    const endClean = (ev.end_time || '11:00').replace(':', '') + '00';
+    const dtStart = `${dateClean}T${startClean}`;
+    const dtEnd = `${dateClean}T${endClean}`;
+    const summary = `Lezione: ${ev.course}`;
+    const location = ev.aula || 'UNIMIB';
+    const description = `Docente: ${ev.docente || ''}\nAula: ${ev.aula || ''}\nTipo: ${ev.type || 'Lezione'}\nNote: ${ev.notes || ''}`;
+
+    return [
+      'BEGIN:VEVENT',
+      `UID:teacher-lesson-${ev.id || Math.random()}@unimib.it`,
+      `DTSTAMP:${nowStamp}`,
+      `DTSTART:${dtStart}`,
+      `DTEND:${dtEnd}`,
+      `SUMMARY:${summary.replace(/,/g, '\\,')}`,
+      `LOCATION:${location.replace(/,/g, '\\,')}`,
+      `DESCRIPTION:${description.replace(/\n/g, '\\n').replace(/,/g, '\\,')}`,
+      'END:VEVENT'
+    ].join('\r\n');
+  }).filter(Boolean);
+
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//UNIMIB Orari//IT',
+    'CALSCALE:GREGORIAN',
+    ...vEvents,
+    'END:VCALENDAR'
+  ].join('\r\n');
+
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  const teacherNameClean = (teacher ? teacher.name : 'docente').replace(/[^a-zA-Z0-9]/g, '_');
+  link.download = `lezioni_${teacherNameClean}.ics`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  showToast('Tutte le lezioni esportate in .ics! 📅');
+}
+
+function setupTeachersEventListeners() {
+  const yearSelect = document.getElementById('teachersYearSelect');
+  if (yearSelect) {
+    yearSelect.addEventListener('change', () => {
+      teachersState.selectedYear = yearSelect.value;
+      teachersState.allTeachers = [];
+      loadTeachersList(true);
+      if (teachersState.selectedTeacher) {
+        loadTeacherCalendar(true);
+      }
+    });
+  }
+
+  const searchInput = document.getElementById('teachersSearchInput');
+  const autocompleteList = document.getElementById('teachersAutocompleteList');
+  const btnClear = document.getElementById('btnClearTeacherSearch');
+
+  let debounceTimer = null;
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      const val = searchInput.value;
+      if (btnClear) btnClear.style.display = val ? 'block' : 'none';
+
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        renderTeacherAutocomplete(val);
+      }, 150);
+    });
+
+    searchInput.addEventListener('focus', () => {
+      if (searchInput.value.trim().length >= 2) {
+        renderTeacherAutocomplete(searchInput.value);
+      }
+    });
+
+    searchInput.addEventListener('keydown', (e) => {
+      if (!autocompleteList || autocompleteList.style.display === 'none') return;
+      const items = autocompleteList.querySelectorAll('.teachers-autocomplete-item');
+      if (!items.length) return;
+
+      let activeIndex = Array.from(items).findIndex(el => el.classList.contains('active'));
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (activeIndex >= 0) items[activeIndex].classList.remove('active');
+        activeIndex = (activeIndex + 1) % items.length;
+        items[activeIndex].classList.add('active');
+        items[activeIndex].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (activeIndex >= 0) items[activeIndex].classList.remove('active');
+        activeIndex = (activeIndex - 1 + items.length) % items.length;
+        items[activeIndex].classList.add('active');
+        items[activeIndex].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (activeIndex >= 0 && items[activeIndex]) {
+          items[activeIndex].click();
+        }
+      } else if (e.key === 'Escape') {
+        autocompleteList.style.display = 'none';
+      }
+    });
+  }
+
+  if (btnClear) {
+    btnClear.addEventListener('click', () => {
+      if (searchInput) {
+        searchInput.value = '';
+        searchInput.focus();
+      }
+      btnClear.style.display = 'none';
+      if (autocompleteList) autocompleteList.style.display = 'none';
+    });
+  }
+
+  // Click outside closes autocomplete
+  document.addEventListener('click', (e) => {
+    if (autocompleteList && !autocompleteList.contains(e.target) && e.target !== searchInput) {
+      autocompleteList.style.display = 'none';
+    }
+  });
+
+  const btnFav = document.getElementById('btnToggleTeacherFavorite');
+  if (btnFav) {
+    btnFav.addEventListener('click', () => {
+      toggleTeacherFavorite(teachersState.selectedTeacher);
+    });
+  }
+
+  const btnShare = document.getElementById('btnShareTeacherLink');
+  if (btnShare) {
+    btnShare.addEventListener('click', () => {
+      shareTeacherCalendar(teachersState.selectedTeacher);
+    });
+  }
+
+  const courseSelect = document.getElementById('teacherCourseSelect');
+  if (courseSelect) {
+    courseSelect.addEventListener('change', () => {
+      teachersState.selectedCourseFilter = courseSelect.value;
+      renderTeacherEvents();
+    });
+  }
+
+  const btnViewWeek = document.getElementById('btnTeacherViewWeek');
+  const btnViewAll = document.getElementById('btnTeacherViewAll');
+  const weekNav = document.getElementById('teachersWeekNavigator');
+  const daysBar = document.getElementById('teachersDaysTabBar');
+
+  if (btnViewWeek && btnViewAll) {
+    btnViewWeek.addEventListener('click', () => {
+      teachersState.viewMode = 'week';
+      btnViewWeek.classList.add('active');
+      btnViewAll.classList.remove('active');
+      if (weekNav) weekNav.style.display = 'flex';
+      if (daysBar) daysBar.style.display = 'flex';
+      loadTeacherCalendar();
+    });
+
+    btnViewAll.addEventListener('click', () => {
+      teachersState.viewMode = 'all';
+      btnViewAll.classList.add('active');
+      btnViewWeek.classList.remove('active');
+      if (weekNav) weekNav.style.display = 'none';
+      if (daysBar) daysBar.style.display = 'none';
+      loadTeacherCalendar();
+    });
+  }
+
+  const eventFilterInput = document.getElementById('teachersEventFilterInput');
+  if (eventFilterInput) {
+    eventFilterInput.addEventListener('input', () => {
+      teachersState.searchFilter = eventFilterInput.value.trim().toLowerCase();
+      renderTeacherEvents();
+    });
+  }
+
+  const btnPrevWeek = document.getElementById('btnTeachersPrevWeek');
+  const btnNextWeek = document.getElementById('btnTeachersNextWeek');
+  const btnToday = document.getElementById('btnTeachersToday');
+
+  if (btnPrevWeek) btnPrevWeek.addEventListener('click', () => changeTeacherWeek(-7));
+  if (btnNextWeek) btnNextWeek.addEventListener('click', () => changeTeacherWeek(7));
+  if (btnToday) {
+    btnToday.addEventListener('click', () => {
+      teachersState.currentMonday = formatFormattedDate(getMonday(new Date()));
+      teachersState.selectedDayDate = 'all';
+      loadTeacherCalendar();
+    });
   }
 }
 

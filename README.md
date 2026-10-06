@@ -19,27 +19,36 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 - **⚠️ Cancellation Notices**: Automatically highlights canceled lectures or last-minute room changes in red.
 - **🔗 Share Link & QR Code**: Generate a link or QR code containing your course configuration for instant preview and one-tap import.
 
-### 2. 🏛️ Classroom Occupancy (Occupazione Aule)
+### 2. 🧑‍🏫 Teacher Timetable (Calendario Docenti)
+- **🔍 1,700+ Faculty Directory**: Instant real-time autocomplete search across all professors and lecturers at the University of Milano-Bicocca.
+- **📅 Weekly & Semester-Wide Views**: Inspect weekly lecture schedules or toggle **"Tutti gli Eventi"** to view all scheduled dates, labs, and exercises throughout the entire semester.
+- **⭐ Saved Favorite Professors**: Save your favorite professors for one-tap switching directly from the top bar without re-typing their names.
+- **🎓 Multi-Degree Filter**: For professors teaching across multiple faculties, filter by specific degree programme or view all their university teaching appointments at once.
+- **✉️ Direct Teacher Contacts**: View verified institutional email addresses (`@unimib.it`) with one-tap `mailto:` compose.
+- **📥 One-Tap iCalendar Export (.ics)**: Download an `.ics` file for an individual lecture or export the professor's entire week with a single click.
+- **🔗 Shareable Links**: Direct URLs support (`/?tab=docenti&docente=013696`) to immediately open any lecturer's timetable.
+
+### 3. 🏛️ Classroom Occupancy (Occupazione Aule)
 - **🏢 All Campus Buildings**: Real-time room status for all 26+ UNIMIB buildings (U01 through U28).
 - **🟢 Status at a Glance**: Instant visual badges indicating whether a room is **Libera** (Free) or **Occupata** (Occupied).
 - **⏳ Smart Time Windows**: Computes exact availability (*"Libera fino alle 14:30"* or *"Occupata fino alle 16:30"*), automatically chaining consecutive contiguous lectures.
 - **⏰ Time Slots & Italian Date Picker**: Check occupancy right now or inspect specific time blocks (09:00, 11:00, 13:00, 14:30, 16:30) for any date in Italian format (`GG/MM/AAAA`).
 - **📋 Full Daily Schedule**: Tap any classroom card to open a modal displaying the complete chronological list of lectures and bookings held in that room for the selected day.
 
-### 3. 📝 Exam Calendar (Calendario Esami)
+### 4. 📝 Exam Calendar (Calendario Esami)
 - **🎓 Monitored Courses**: Automatically imports exam dates for your degree and allows adding extra courses from any didactic area across the university.
 - **⭐ Personalized Exam Filter**: Switch between **"📚 Tutti gli Appelli"** (all exams for the degree) and **"⭐ I Miei Corsi"** (only exams matching the teachings you actually attend).
 - **🗓️ Session Filters**: Quick presets for Winter (*Invernale*), Summer (*Estiva*), Autumn (*Autunnale*), or Custom Date Range.
 - **📅 Add to Calendar (.ics)**: Download an `.ics` file for any exam appeal to import it directly into Apple Calendar, Google Calendar, or Outlook.
 
-### 4. 👤 Cloud Profile & Synchronisation (No Complex Passwords)
+### 5. 👤 Cloud Profile & Synchronisation (No Complex Passwords)
 - **🔑 Memorable Auth (Nickname + PIN)**: No email or password needed. Create an account with your chosen **Soprannome** (e.g. `Mario`) and a 4-8 digit **PIN** (e.g. `1234`).
 - **📚 Guided Study Plan Onboarding (2-Step Flow)**: When creating a profile, users are immediately guided to select their degree programme, study year, and active teachings (⭐ I miei corsi). If the student has already picked a course as a guest, a 1-tap instant save option (*"Salva profilo con questo corso"*) is also provided.
 - **📱 Multi-Device Sync**: Log in on any device (iPhone, laptop, tablet) simply by entering your Soprannome and PIN. Your study plan, favorite courses, and monitored exams sync automatically.
 - **⚡ First-Visit Onboarding**: First-time visitors can choose to create a profile, log in to restore an existing plan, or **Continua come ospite** (Guest mode) to start immediately without registration.
 - **☁️ Serverless Storage**: Backed by **Upstash Redis REST API**, salted with SHA-256 for secure PIN verification.
 
-### 5. 👥 Friends Shared Calendar & Synchronized Groups (Gruppi & Calendario Condiviso)
+### 6. 👥 Friends Shared Calendar & Synchronized Groups (Gruppi & Calendario Condiviso)
 - **🔒 Privacy First (Zero Leaked Credentials)**: Your personal PIN remains strictly private and is only used to log in on your own devices. The system generates an independent, unique 6-character **Codice Calendario Univoco** (e.g. `K9X2P4`) using unambiguous characters (no `0`, `O`, `1`, `I`).
 - **🤝 Bidirectional Cloud Group Sync**: When you add a friend via their calendar code (or invite them to a group), **both students are automatically linked to the same cloud group in Redis**. The friend automatically sees your timetable and group members on their own device without needing to manually re-enter your code.
 - **🏷️ Unique Group Codes & Links**: Groups receive a persistent group code (e.g. `G7K2P9`) and shareable link (e.g. `/?group=G7K2P9`). Anyone opening the link or entering the code is instantly added to the group for everyone.
@@ -51,7 +60,7 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 - **🟢 Free Slots View (up to 18:30)**: Switch to **"🟢 Slot liberi"** to calculate time windows (≥ 30 min) between 08:30 and 18:30 when **everyone** in the group has no lectures — perfect for finding study breaks, project meetings, or lunch times.
 - **⚡ Background Auto-Sync**: The friends group automatically re-synchronizes when the tab becomes active or visible (`visibilitychange`).
 
-### 6. 📱 iOS & Mobile Optimizations
+### 7. 📱 iOS & Mobile Optimizations
 - **Safe Area Inset Support**: Fully accounts for iPhone notch, Dynamic Island, and home indicator bars (`env(safe-area-inset-top)` and `env(safe-area-inset-bottom)`).
 - **Compact Header Breakpoints**: Responsive adjustments for narrower screens (e.g. iPhone SE / mini) to keep all navigation buttons accessible.
 - **PWA Offline Caching**: Service Worker v12 caches core application assets for fast load times and offline readiness.
@@ -104,13 +113,14 @@ flowchart TD
 │   ├── profile.py          # Profile management & PIN authentication (Upstash Redis)
 │   ├── rooms.py            # Live classroom occupancy scraper
 │   ├── shared_calendar.py  # Combined multi-student timetable generator
+│   ├── teachers.py         # Teacher directory and weekly schedule scraper
 │   └── group.py            # Synchronized cloud study groups & bidirectional friend linking
 ├── public/
 │   ├── css/
 │   │   └── style.css       # Responsive dark-theme & glassmorphism styles
 │   ├── js/
 │   │   ├── app.js          # Main SPA application logic & state management
-│   │   └── sw.js           # PWA Service Worker (offline cache v11)
+│   │   └── sw.js           # PWA Service Worker (offline cache v14)
 │   ├── icons/              # App icons for iOS / Android home screens
 │   ├── index.html          # Single Page Application HTML template
 │   └── manifest.json       # Web App Manifest
@@ -127,6 +137,7 @@ flowchart TD
 | :--- | :--- | :--- |
 | `GET` | `/api/options` | Returns academic years, didactic areas, degree courses, and study years |
 | `GET` | `/api/calendar` | Returns lessons for selected degree course and study years for a given week (`date=DD-MM-YYYY`) |
+| `GET` | `/api/teachers` | Returns 1700+ UNIMIB faculty directory (`?anno=YYYY`), or lecturer timetable (`?docente=<CODE>&date=DD-MM-YYYY&all_events=1`) |
 | `GET` | `/api/rooms` | Returns real-time room occupancy and daily schedule for a campus building (`sede=U01`, `date=DD-MM-YYYY` or `YYYY-MM-DD`, `time=HH:MM`) |
 | `GET` | `/api/exams` | Returns upcoming exam appeals filtered by degree courses, years, and date range |
 | `POST` | `/api/profile` | Creates a new account (`{ nickname, pin, config, exam_courses }`) and returns generated `share_code` |

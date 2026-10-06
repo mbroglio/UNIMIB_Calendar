@@ -95,7 +95,122 @@
     </main>
   </section>
 
-  <!-- 2. Classroom Occupancy View -->
+  <!-- 2. Teachers Calendar View (Calendario Docenti) -->
+  <section id="viewTeachers" class="app-view hidden">
+    <!-- Controls: Academic Year, Search Docente, Favorites, Course Filter -->
+    <div class="control-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <label for="teachersSearchInput" style="font-size:0.75rem; font-weight:700; color:var(--text-secondary); text-transform:uppercase; margin:0;">🧑‍🏫 Cerca Docente</label>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <label for="teachersYearSelect" style="font-size:0.75rem; color:var(--text-muted); margin:0;">A.A.:</label>
+          <select id="teachersYearSelect" style="padding: 4px 8px; font-size: 0.78rem; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #FFF; outline: none;">
+            <!-- Rendered dynamically -->
+          </select>
+        </div>
+      </div>
+
+      <!-- Autocomplete Search Container -->
+      <div style="position: relative; margin-bottom: 10px;">
+        <input type="text" id="teachersSearchInput" placeholder="🔍 Cerca docente (es. Abbotto, Arcelli, Antoniotti)..." 
+               style="width: 100%; padding: 10px 36px 10px 14px; border-radius: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #FFF; font-size: 0.88rem; outline: none;"
+               autocomplete="off">
+        <button id="btnClearTeacherSearch" class="btn-icon" style="position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; font-size: 0.8rem; display: none;" title="Cancella ricerca">✕</button>
+        <div id="teachersAutocompleteList" class="teachers-autocomplete-dropdown" style="display: none;">
+          <!-- Autocomplete results populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Bookmarked / Favorite Teachers Quick Bar -->
+      <div id="teachersFavoritesSection" style="margin-bottom: 10px; display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+          <span style="font-size: 0.72rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">⭐ I tuoi docenti salvati</span>
+        </div>
+        <div id="teachersFavoritesList" class="exam-courses-bar" style="margin-bottom: 0;">
+          <!-- Favorite chips populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Selected Teacher Header & Filter Card -->
+      <div id="selectedTeacherCard" style="display: none; background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px; margin-bottom: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+          <div style="flex: 1; min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <span id="selectedTeacherName" style="font-size: 1rem; font-weight: 700; color: #FFF;"></span>
+              <span id="selectedTeacherBadge" class="badge-status" style="font-size: 0.72rem; padding: 2px 8px;">Docente</span>
+            </div>
+            <div id="selectedTeacherEmails" style="font-size: 0.78rem; color: var(--accent-cyan); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 8px;">
+              <!-- Emails rendered here -->
+            </div>
+          </div>
+          <div style="display: flex; gap: 6px; flex-shrink: 0;">
+            <button id="btnToggleTeacherFavorite" class="btn-icon" style="width: 34px; height: 34px;" title="Aggiungi ai preferiti">⭐</button>
+            <button id="btnShareTeacherLink" class="btn-icon" style="width: 34px; height: 34px;" title="Condividi orario docente">🔗</button>
+          </div>
+        </div>
+
+        <!-- Optional course filter for this teacher -->
+        <div id="teacherCourseFilterContainer" style="margin-top: 10px; display: none;">
+          <label for="teacherCourseSelect" style="font-size: 0.74rem; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">Filtra per corso di laurea:</label>
+          <select id="teacherCourseSelect" style="width: 100%; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #FFF; font-size: 0.82rem; outline: none;">
+            <option value="">📚 Tutti i corsi del docente</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- View Mode: Week vs All Semester -->
+      <div class="toggle-group" style="margin-bottom: 10px;">
+        <button id="btnTeacherViewWeek" class="toggle-btn active">📅 Settimana</button>
+        <button id="btnTeacherViewAll" class="toggle-btn">📚 Tutti gli Eventi</button>
+      </div>
+
+      <!-- Filter events search within selected schedule -->
+      <div style="position: relative;">
+        <input type="text" id="teachersEventFilterInput" placeholder="🔍 Filtra lezioni per materia o aula..." 
+               style="width: 100%; padding: 8px 12px; border-radius: 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); color: #FFF; font-size: 0.82rem; outline: none;">
+      </div>
+    </div>
+
+    <!-- Week Navigator Bar (only in week mode) -->
+    <div id="teachersWeekNavigator" class="week-navigator">
+      <button id="btnTeachersPrevWeek" class="week-nav-btn">◀ Prev</button>
+      <div class="week-label">
+        <div id="teachersWeekLabelText" class="date-range">Caricamento...</div>
+        <span id="btnTeachersToday" class="badge-status" style="cursor: pointer;">Oggi / Questa Settimana</span>
+      </div>
+      <button id="btnTeachersNextWeek" class="week-nav-btn">Next ▶</button>
+    </div>
+
+    <!-- Day Tabs Bar -->
+    <div id="teachersDaysTabBar" class="days-tab-bar">
+      <!-- Rendered dynamically -->
+    </div>
+
+    <!-- Main Teachers Content -->
+    <main>
+      <div id="teachersSpinnerContainer" class="spinner-container" style="display: none;">
+        <div class="spinner"></div>
+        <p style="font-size:0.85rem; color:var(--text-secondary);">Caricamento orario docente da UNIMIB...</p>
+      </div>
+
+      <!-- Empty state when no teacher is chosen or no events -->
+      <div id="teachersEmptyState" class="empty-state" style="padding: 40px 20px;">
+        <div class="empty-icon" style="font-size: 2.8rem; margin-bottom: 12px;">🧑‍🏫</div>
+        <h3 id="teachersEmptyTitle" style="font-size: 1.15rem; color: #FFF; margin-bottom: 8px;">Cerca un docente</h3>
+        <p id="teachersEmptyDesc" style="font-size: 0.85rem; color: var(--text-secondary); max-width: 320px; margin: 0 auto 16px;">
+          Digita il cognome o nome di un professore per visualizzare l'orario settimanale delle sue lezioni e l'aula.
+        </p>
+        <div id="teachersQuickSuggestions" style="display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; max-width: 380px; margin: 0 auto;">
+          <!-- Quick clickable suggestions for popular teachers or first time -->
+        </div>
+      </div>
+
+      <div id="teachersEventsContainer" class="events-container" style="display: none;">
+        <!-- Teacher events rendered dynamically -->
+      </div>
+    </main>
+  </section>
+
+  <!-- 3. Classroom Occupancy View -->
   <section id="viewRooms" class="app-view hidden">
     <!-- Building & Date Selection Card -->
     <div class="control-card">
@@ -462,6 +577,10 @@
     <button id="tabTimetable" class="nav-tab active">
       <span class="nav-icon">📅</span>
       <span class="nav-label">Orario</span>
+    </button>
+    <button id="tabTeachers" class="nav-tab">
+      <span class="nav-icon">🧑‍🏫</span>
+      <span class="nav-label">Docenti</span>
     </button>
     <button id="tabRooms" class="nav-tab">
       <span class="nav-icon">🏫</span>

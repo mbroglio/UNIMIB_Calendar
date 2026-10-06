@@ -28,6 +28,14 @@
     {
       "source": "/api/group",
       "destination": "/api/group.py"
+    },
+    {
+      "source": "/api/teachers",
+      "destination": "/api/teachers.py"
+    },
+    {
+      "source": "/api/teacher_calendar",
+      "destination": "/api/teachers.py"
     }
   ]
 }
