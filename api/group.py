@@ -1,29 +1,36 @@
 """
-UNIMIB Calendar – Group & Cloud Friends Sync API
-=================================================
-Manages synchronized study groups in Upstash Redis so that when
-a student adds a friend, both students (and all other members in the group)
-are automatically part of the same shared group in real time.
+UNIMIB Calendar – Multi-Group & Shared Calendar API
+====================================================
+Manages multiple synchronized study groups per user in Upstash Redis.
 
 Data Model:
 - group:<group_id> -> {
     "id":         "G9X2P4",
-    "name":       "Gruppo Studio",
+    "name":       "Gruppo Studio Analisi",
     "creator":    "K9X2P4",
     "members":    ["K9X2P4", "W3M7R2", ...],
     "created_at": 1727870000,
     "updated_at": 1727870000
   }
-- user_group:<share_code_lower> -> "<group_id>"
+- user_groups:<share_code_lower> -> ["G9X2P4", "G3M1P8", ...]
+  (Users initially start with 0 groups: [])
+
+Authorization:
+- Modifying actions (create_group, join_group, leave_group, rename_group, add_member, remove_member)
+  require a valid session token (Authorization: Bearer <session_token>).
+- Only members of a group may rename it or add/remove members.
 
 Endpoints:
-- GET  /api/group?user=<SHARE_CODE>   – fetch group & members for a user
-- GET  /api/group?id=<GROUP_ID>       – fetch group & members by group ID/code
-- POST /api/group                     – actions: add_member, sync, remove_member, join_group, rename_group
+- GET  /api/group?user=<SHARE_CODE>[&group_id=<ID>]  – fetch user groups & active group details
+- GET  /api/group?id=<GROUP_ID>                      – fetch group & members by group ID/code
+- POST /api/group                                    – actions: create_group, join_group, leave_group,
+                                                                rename_group, add_member, remove_member,
+                                                                list_user_groups, sync
 """
 
 import os
 import json
+import re
 import secrets
 import time
 import urllib.request
@@ -54,6 +61,7 @@ MEMBER_COLORS = [
 
 SHARE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 GROUP_CODE_LEN = 6
+SESSION_TTL_SECONDS = 90 * 86400
 
 
 # ── Redis Helpers ─────────────────────────────────────────────────────────────
@@ -74,7 +82,7 @@ def _redis(method: str, *args):
 
 def redis_get(key: str):
     raw = _redis("GET", key)
-    if not raw:
+    if raw is None:
         return None
     try:
         return json.loads(raw)
@@ -96,6 +104,28 @@ def redis_del(key: str):
 
 def _gen_group_id() -> str:
     return "G" + "".join(secrets.choice(SHARE_CHARS) for _ in range(GROUP_CODE_LEN - 1))
+
+
+# ── Auth & Profile Helpers ───────────────────────────────────────────────────
+
+def _get_auth_session(headers, body: dict) -> Optional[dict]:
+    auth = headers.get("Authorization") or headers.get("authorization") or ""
+    token = ""
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+    elif "session_token" in body:
+        token = str(body["session_token"]).strip()
+
+    if not token:
+        return None
+
+    session = redis_get(f"session:{token}")
+    if session and isinstance(session, dict):
+        # Slide session TTL
+        session["last_active"] = int(time.time())
+        redis_set(f"session:{token}", session, ex=SESSION_TTL_SECONDS)
+        return session
+    return None
 
 
 def _resolve_profile(code: str) -> Optional[dict]:
@@ -124,6 +154,18 @@ def _resolve_profile(code: str) -> Optional[dict]:
             "config":     acc.get("config")
         }
 
+    # Also try normalized clean nickname
+    clean_norm = re.sub(r'[^a-z0-9_-]', '', clean)
+    if clean_norm and clean_norm != clean:
+        acc = redis_get(f"account:{clean_norm}")
+        if acc and isinstance(acc, dict):
+            return {
+                "id":         acc.get("share_code", clean.upper()),
+                "share_code": acc.get("share_code", clean.upper()),
+                "nickname":   acc.get("nickname", clean),
+                "config":     acc.get("config")
+            }
+
     # 3. Check legacy profile
     legacy = redis_get(f"profile:{clean}")
     if legacy and isinstance(legacy, dict):
@@ -135,6 +177,68 @@ def _resolve_profile(code: str) -> Optional[dict]:
         }
 
     return None
+
+
+# ── Multi-Group Data Model Helpers ────────────────────────────────────────────
+
+def _get_user_group_ids(user_code: str) -> List[str]:
+    """Retrieve the list of group IDs a user belongs to."""
+    if not user_code:
+        return []
+    clean = user_code.strip().lower()
+    raw = redis_get(f"user_groups:{clean}")
+    if raw is not None:
+        if isinstance(raw, list):
+            return [str(g).upper() for g in raw if g]
+        elif isinstance(raw, str):
+            return [str(raw).upper()]
+
+    # Backward compatibility: check legacy user_group:{clean}
+    legacy = redis_get(f"user_group:{clean}")
+    if legacy and isinstance(legacy, str):
+        gids = [legacy.upper()]
+        redis_set(f"user_groups:{clean}", gids)
+        return gids
+
+    return []
+
+
+def _save_user_group_ids(user_code: str, group_ids: List[str]):
+    clean = user_code.strip().lower()
+    # Deduplicate preserving order
+    unique: List[str] = []
+    for gid in group_ids:
+        g = str(gid).upper()
+        if g not in unique:
+            unique.append(g)
+    redis_set(f"user_groups:{clean}", unique)
+
+
+def _get_user_groups_summary(user_code: str) -> List[dict]:
+    gids = _get_user_group_ids(user_code)
+    summary = []
+    valid_gids = []
+
+    for gid in gids:
+        group_data = redis_get(f"group:{gid.lower()}")
+        if group_data and isinstance(group_data, dict):
+            # Verify user is still an active member of this group
+            members_upper = [str(m).upper() for m in group_data.get("members", [])]
+            if user_code.upper() in members_upper:
+                valid_gids.append(gid)
+                summary.append({
+                    "id":            group_data.get("id", gid),
+                    "name":          group_data.get("name", "Gruppo Studio"),
+                    "creator":       group_data.get("creator", ""),
+                    "members_count": len(group_data.get("members", [])),
+                    "updated_at":    group_data.get("updated_at", 0)
+                })
+
+    # Clean up stale references if any groups were deleted or membership revoked
+    if len(valid_gids) != len(gids):
+        _save_user_group_ids(user_code, valid_gids)
+
+    return summary
 
 
 def _get_group_with_members(group_id: str) -> Optional[dict]:
@@ -161,9 +265,9 @@ def _get_group_with_members(group_id: str) -> Optional[dict]:
             })
         else:
             resolved_members.append({
-                "id":         m_code.upper(),
-                "share_code": m_code.upper(),
-                "nickname":   m_code.upper(),
+                "id":         str(m_code).upper(),
+                "share_code": str(m_code).upper(),
+                "nickname":   str(m_code).upper(),
                 "config":     None,
                 "color":      color
             })
@@ -206,7 +310,7 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.end_headers()
 
     def do_GET(self):
@@ -220,19 +324,30 @@ class handler(BaseHTTPRequestHandler):
                     return self._send_json(404, {"error": "Gruppo non trovato"})
                 return self._send_json(200, data)
 
-            # 2. Fetch by user share code: ?user=K9X2P4
+            # 2. Fetch by user share code: ?user=K9X2P4 (or via session token)
             user_code = qs.get("user", "").strip().upper()
+            if not user_code:
+                session = _get_auth_session(self.headers, {})
+                if session:
+                    user_code = str(session.get("share_code", "")).strip().upper()
+
             if user_code:
-                gid = redis_get(f"user_group:{user_code.lower()}")
-                if not gid or not isinstance(gid, str):
-                    return self._send_json(200, {"group": None, "members": []})
+                groups_summary = _get_user_groups_summary(user_code)
+                current_gid = qs.get("group_id", "").strip().upper()
 
-                data = _get_group_with_members(gid)
-                if not data:
-                    redis_del(f"user_group:{user_code.lower()}")
-                    return self._send_json(200, {"group": None, "members": []})
+                if current_gid and not any(g["id"] == current_gid for g in groups_summary):
+                    current_gid = ""
 
-                return self._send_json(200, data)
+                if not current_gid and groups_summary:
+                    current_gid = groups_summary[0]["id"]
+
+                active_group_data = _get_group_with_members(current_gid) if current_gid else None
+
+                return self._send_json(200, {
+                    "groups":  groups_summary,
+                    "group":   active_group_data["group"] if active_group_data else None,
+                    "members": active_group_data["members"] if active_group_data else []
+                })
 
             return self._send_json(400, {"error": "Specificare il parametro 'user' o 'id'"})
 
@@ -241,206 +356,239 @@ class handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
-            body        = self._read_body()
-            action      = body.get("action", "")
-            user_code   = str(body.get("user_code", "")).strip().upper()
+            body = self._read_body()
+            action = body.get("action", "")
 
-            if not user_code:
-                return self._send_json(400, {"error": "user_code obbligatorio"})
+            # Verify session token for modifying group actions
+            session = _get_auth_session(self.headers, body)
+            if not session:
+                return self._send_json(401, {"error": "Autenticazione richiesta. Effettua l'accesso col tuo profilo."})
 
-            # ── ACTION: add_member ──────────────────────────────────────────
-            if action == "add_member":
-                friend_code = str(body.get("friend_code", "")).strip().upper()
-                if not friend_code or friend_code == user_code:
-                    return self._send_json(400, {"error": "friend_code non valido"})
+            auth_user_code = str(session.get("share_code", "")).strip().upper()
+            if not auth_user_code:
+                return self._send_json(401, {"error": "Sessione non valida"})
 
-                # Verify friend exists
-                friend_prof = _resolve_profile(friend_code)
-                if not friend_prof:
-                    return self._send_json(404, {"error": "Codice amico non trovato"})
-                friend_actual_code = friend_prof["share_code"].upper()
+            # ── ACTION: create_group ──────────────────────────────────────────
+            if action == "create_group":
+                name = str(body.get("name", "Gruppo Studio")).strip()[:40] or "Gruppo Studio"
 
-                # 1. Check if user already has a group
-                gid = redis_get(f"user_group:{user_code.lower()}")
-                group_data = None
-                if gid and isinstance(gid, str):
-                    group_data = redis_get(f"group:{gid.lower()}")
-
-                # 2. If user has no group, check if friend already has a group
-                if not group_data or not isinstance(group_data, dict):
-                    friend_gid = redis_get(f"user_group:{friend_actual_code.lower()}")
-                    if friend_gid and isinstance(friend_gid, str):
-                        fg = redis_get(f"group:{friend_gid.lower()}")
-                        if fg and isinstance(fg, dict):
-                            gid = friend_gid
-                            group_data = fg
-
-                # 3. If neither has a group, create a brand new group
-                if not group_data or not isinstance(group_data, dict):
-                    user_prof = _resolve_profile(user_code)
-                    nick = user_prof["nickname"] if user_prof else "Amici"
+                # Generate unique group ID
+                gid = None
+                for _ in range(10):
+                    candidate = _gen_group_id()
+                    if not redis_get(f"group:{candidate.lower()}"):
+                        gid = candidate
+                        break
+                if not gid:
                     gid = _gen_group_id()
-                    group_data = {
-                        "id":         gid,
-                        "name":       f"Gruppo {nick}",
-                        "creator":    user_code,
-                        "members":    [user_code],
-                        "created_at": int(time.time()),
-                        "updated_at": int(time.time())
-                    }
-                    redis_set(f"user_group:{user_code.lower()}", gid)
 
-                members = list(group_data.get("members", []))
-                if user_code not in members:
-                    members.append(user_code)
+                group_data = {
+                    "id":         gid,
+                    "name":       name,
+                    "creator":    auth_user_code,
+                    "members":    [auth_user_code],
+                    "created_at": int(time.time()),
+                    "updated_at": int(time.time())
+                }
+                redis_set(f"group:{gid.lower()}", group_data)
 
-                # 4. If friend was in a different group, merge all members from that group
-                friend_gid = redis_get(f"user_group:{friend_actual_code.lower()}")
-                if friend_gid and isinstance(friend_gid, str) and friend_gid.lower() != str(gid).lower():
-                    old_fg = redis_get(f"group:{friend_gid.lower()}")
-                    if old_fg and isinstance(old_fg, dict):
-                        for m in old_fg.get("members", []):
-                            if m not in members:
-                                members.append(m)
-                            redis_set(f"user_group:{str(m).lower()}", gid)
-
-                # 5. Add friend to members
-                if friend_actual_code not in members:
-                    members.append(friend_actual_code)
-
-                group_data["members"] = members
-                group_data["updated_at"] = int(time.time())
-
-                redis_set(f"group:{str(gid).lower()}", group_data)
-                redis_set(f"user_group:{user_code.lower()}", gid)
-                redis_set(f"user_group:{friend_actual_code.lower()}", gid)
-
-                # Also ensure all members are linked to this group in Redis
-                for m in members:
-                    redis_set(f"user_group:{str(m).lower()}", gid)
+                # Add to user's groups
+                user_gids = _get_user_group_ids(auth_user_code)
+                if gid not in user_gids:
+                    user_gids.append(gid)
+                _save_user_group_ids(auth_user_code, user_gids)
 
                 result = _get_group_with_members(gid)
-                return self._send_json(200, result)
+                result["groups"] = _get_user_groups_summary(auth_user_code)
+                return self._send_json(201, result)
 
-            # ── ACTION: sync (bidirectional local & cloud sync) ──────────────
-            elif action == "sync":
-                friend_codes = [str(c).strip().upper() for c in body.get("friend_codes", []) if str(c).strip().upper() != user_code]
-
-                # 1. Check user's current group
-                gid = redis_get(f"user_group:{user_code.lower()}")
-                group_data = None
-                if gid and isinstance(gid, str):
-                    group_data = redis_get(f"group:{gid.lower()}")
-
-                # 2. If user has no group, check if any friend already has a group
-                if not group_data or not isinstance(group_data, dict):
-                    for fc in friend_codes:
-                        f_prof = _resolve_profile(fc)
-                        act_code = f_prof["share_code"].upper() if f_prof else fc
-                        f_gid = redis_get(f"user_group:{act_code.lower()}")
-                        if f_gid and isinstance(f_gid, str):
-                            fg = redis_get(f"group:{f_gid.lower()}")
-                            if fg and isinstance(fg, dict):
-                                gid = f_gid
-                                group_data = fg
-                                break
-
-                # 3. If still no group in cloud, create one if friend_codes exist
-                if (not group_data or not isinstance(group_data, dict)):
-                    if friend_codes:
-                        user_prof = _resolve_profile(user_code)
-                        nick = user_prof["nickname"] if user_prof else "Amici"
-                        gid = _gen_group_id()
-                        group_data = {
-                            "id":         gid,
-                            "name":       f"Gruppo {nick}",
-                            "creator":    user_code,
-                            "members":    [user_code],
-                            "created_at": int(time.time()),
-                            "updated_at": int(time.time())
-                        }
-                        redis_set(f"user_group:{user_code.lower()}", gid)
-                    else:
-                        return self._send_json(200, {"group": None, "members": []})
-
-                # 4. Merge user_code and local friend_codes into cloud group
-                members = list(group_data.get("members", []))
-                if user_code not in members:
-                    members.append(user_code)
-
-                for fc in friend_codes:
-                    f_prof = _resolve_profile(fc)
-                    act_code = f_prof["share_code"].upper() if f_prof else fc
-                    if act_code not in members:
-                        members.append(act_code)
-
-                group_data["members"] = members
-                group_data["updated_at"] = int(time.time())
-                redis_set(f"group:{str(gid).lower()}", group_data)
-                redis_set(f"user_group:{user_code.lower()}", gid)
-
-                for m in members:
-                    redis_set(f"user_group:{str(m).lower()}", gid)
-
-                result = _get_group_with_members(gid)
-                return self._send_json(200, result)
-
-            # ── ACTION: remove_member ───────────────────────────────────────
-            elif action == "remove_member":
-                remove_code = str(body.get("remove_code", "")).strip().upper()
-                gid = redis_get(f"user_group:{user_code.lower()}")
-                if not gid or not isinstance(gid, str):
-                    return self._send_json(200, {"group": None, "members": []})
-
-                group_data = redis_get(f"group:{gid.lower()}")
-                if group_data and isinstance(group_data, dict):
-                    members = [m for m in group_data.get("members", []) if m != remove_code]
-                    group_data["members"] = members
-                    group_data["updated_at"] = int(time.time())
-                    redis_set(f"group:{gid.lower()}", group_data)
-                    # Remove friend's group link
-                    redis_del(f"user_group:{remove_code.lower()}")
-
-                result = _get_group_with_members(gid)
-                return self._send_json(200, result or {"group": None, "members": []})
-
-            # ── ACTION: join_group (by group ID/code) ────────────────────────
+            # ── ACTION: join_group ────────────────────────────────────────────
             elif action == "join_group":
                 target_gid = str(body.get("group_id", "")).strip().upper()
+                if not target_gid:
+                    return self._send_json(400, {"error": "group_id obbligatorio"})
+
                 group_data = redis_get(f"group:{target_gid.lower()}")
                 if not group_data or not isinstance(group_data, dict):
                     return self._send_json(404, {"error": "Codice gruppo non trovato"})
 
                 members = list(group_data.get("members", []))
-                if user_code not in members:
-                    members.append(user_code)
-                group_data["members"] = members
-                group_data["updated_at"] = int(time.time())
+                if not any(m.upper() == auth_user_code for m in members):
+                    members.append(auth_user_code)
+                    group_data["members"] = members
+                    group_data["updated_at"] = int(time.time())
+                    redis_set(f"group:{target_gid.lower()}", group_data)
 
-                redis_set(f"group:{target_gid.lower()}", group_data)
-                redis_set(f"user_group:{user_code.lower()}", target_gid)
+                user_gids = _get_user_group_ids(auth_user_code)
+                if not any(g.upper() == target_gid for g in user_gids):
+                    user_gids.append(target_gid)
+                _save_user_group_ids(auth_user_code, user_gids)
 
                 result = _get_group_with_members(target_gid)
+                result["groups"] = _get_user_groups_summary(auth_user_code)
                 return self._send_json(200, result)
 
-            # ── ACTION: rename_group ────────────────────────────────────────
-            elif action == "rename_group":
-                new_name = str(body.get("name", "")).strip()[:40]
-                if not new_name:
-                    return self._send_json(400, {"error": "Nome gruppo non valido"})
+            # ── ACTION: leave_group ───────────────────────────────────────────
+            elif action == "leave_group":
+                target_gid = str(body.get("group_id", "")).strip().upper()
+                if not target_gid:
+                    return self._send_json(400, {"error": "group_id obbligatorio"})
 
-                gid = redis_get(f"user_group:{user_code.lower()}")
-                if not gid:
-                    return self._send_json(404, {"error": "Nessun gruppo trovato"})
-
-                group_data = redis_get(f"group:{gid.lower()}")
+                group_data = redis_get(f"group:{target_gid.lower()}")
                 if group_data and isinstance(group_data, dict):
-                    group_data["name"] = new_name
-                    group_data["updated_at"] = int(time.time())
-                    redis_set(f"group:{gid.lower()}", group_data)
+                    # Only modify/delete group if user is an active member
+                    if any(m.upper() == auth_user_code for m in group_data.get("members", [])):
+                        members = [m for m in group_data.get("members", []) if m.upper() != auth_user_code]
+                        if len(members) == 0:
+                            redis_del(f"group:{target_gid.lower()}")
+                        else:
+                            group_data["members"] = members
+                            if group_data.get("creator", "").upper() == auth_user_code:
+                                group_data["creator"] = members[0]
+                            group_data["updated_at"] = int(time.time())
+                            redis_set(f"group:{target_gid.lower()}", group_data)
 
-                result = _get_group_with_members(gid)
+                user_gids = [g for g in _get_user_group_ids(auth_user_code) if g.upper() != target_gid]
+                _save_user_group_ids(auth_user_code, user_gids)
+
+                return self._send_json(200, {
+                    "success": True,
+                    "groups":  _get_user_groups_summary(auth_user_code)
+                })
+
+            # ── ACTION: rename_group ──────────────────────────────────────────
+            elif action == "rename_group":
+                target_gid = str(body.get("group_id", "")).strip().upper()
+                new_name = str(body.get("name", "")).strip()[:40]
+                if not target_gid or not new_name:
+                    return self._send_json(400, {"error": "Parametri non validi"})
+
+                group_data = redis_get(f"group:{target_gid.lower()}")
+                if not group_data or not isinstance(group_data, dict):
+                    return self._send_json(404, {"error": "Gruppo non trovato"})
+
+                # Authorization check: user must be member of this group
+                if auth_user_code not in [m.upper() for m in group_data.get("members", [])]:
+                    return self._send_json(403, {"error": "Non sei membro di questo gruppo"})
+
+                group_data["name"] = new_name
+                group_data["updated_at"] = int(time.time())
+                redis_set(f"group:{target_gid.lower()}", group_data)
+
+                result = _get_group_with_members(target_gid)
+                result["groups"] = _get_user_groups_summary(auth_user_code)
                 return self._send_json(200, result)
+
+            # ── ACTION: add_member ────────────────────────────────────────────
+            elif action == "add_member":
+                target_gid = str(body.get("group_id", "")).strip().upper()
+                friend_code = str(body.get("friend_code", "")).strip().upper()
+
+                if not target_gid:
+                    # Fallback to first group if group_id omitted
+                    user_gids = _get_user_group_ids(auth_user_code)
+                    if user_gids:
+                        target_gid = user_gids[0]
+
+                if not target_gid or not friend_code or friend_code == auth_user_code:
+                    return self._send_json(400, {"error": "friend_code o group_id non valido"})
+
+                group_data = redis_get(f"group:{target_gid.lower()}")
+                if not group_data or not isinstance(group_data, dict):
+                    return self._send_json(404, {"error": "Gruppo non trovato"})
+
+                if auth_user_code not in [m.upper() for m in group_data.get("members", [])]:
+                    return self._send_json(403, {"error": "Non sei membro di questo gruppo"})
+
+                friend_prof = _resolve_profile(friend_code)
+                if not friend_prof:
+                    return self._send_json(404, {"error": "Codice amico non trovato"})
+                friend_actual_code = friend_prof["share_code"].upper()
+
+                if friend_actual_code == auth_user_code:
+                    return self._send_json(400, {"error": "Non puoi aggiungere te stesso al gruppo"})
+
+                members = list(group_data.get("members", []))
+                if not any(m.upper() == friend_actual_code for m in members):
+                    members.append(friend_actual_code)
+                    group_data["members"] = members
+                    group_data["updated_at"] = int(time.time())
+                    redis_set(f"group:{target_gid.lower()}", group_data)
+
+                # Link friend to this group in user_groups
+                friend_gids = _get_user_group_ids(friend_actual_code)
+                if not any(g.upper() == target_gid for g in friend_gids):
+                    friend_gids.append(target_gid)
+                _save_user_group_ids(friend_actual_code, friend_gids)
+
+                result = _get_group_with_members(target_gid)
+                result["groups"] = _get_user_groups_summary(auth_user_code)
+                return self._send_json(200, result)
+
+            # ── ACTION: remove_member ─────────────────────────────────────────
+            elif action == "remove_member":
+                target_gid = str(body.get("group_id", "")).strip().upper()
+                remove_code = str(body.get("remove_code", "")).strip().upper()
+
+                if not target_gid:
+                    user_gids = _get_user_group_ids(auth_user_code)
+                    if user_gids:
+                        target_gid = user_gids[0]
+
+                if not target_gid or not remove_code:
+                    return self._send_json(400, {"error": "Parametri non validi"})
+
+                group_data = redis_get(f"group:{target_gid.lower()}")
+                if not group_data or not isinstance(group_data, dict):
+                    return self._send_json(404, {"error": "Gruppo non trovato"})
+
+                if auth_user_code not in [m.upper() for m in group_data.get("members", [])]:
+                    return self._send_json(403, {"error": "Non sei membro di questo gruppo"})
+
+                members = [m for m in group_data.get("members", []) if m.upper() != remove_code]
+                if len(members) == 0:
+                    redis_del(f"group:{target_gid.lower()}")
+                else:
+                    group_data["members"] = members
+                    if group_data.get("creator", "").upper() == remove_code:
+                        group_data["creator"] = members[0]
+                    group_data["updated_at"] = int(time.time())
+                    redis_set(f"group:{target_gid.lower()}", group_data)
+
+                # Unlink removed member from this group
+                r_gids = [g for g in _get_user_group_ids(remove_code) if g.upper() != target_gid]
+                _save_user_group_ids(remove_code, r_gids)
+
+                result = _get_group_with_members(target_gid) if len(members) > 0 else {"group": None, "members": []}
+                result["groups"] = _get_user_groups_summary(auth_user_code)
+                return self._send_json(200, result)
+
+            # ── ACTION: list_user_groups ──────────────────────────────────────
+            elif action == "list_user_groups":
+                return self._send_json(200, {
+                    "groups": _get_user_groups_summary(auth_user_code)
+                })
+
+            # ── ACTION: sync (legacy backward compatibility) ──────────────────
+            elif action == "sync":
+                user_gids = _get_user_group_ids(auth_user_code)
+                if not user_gids:
+                    # User starts without any group – do NOT auto-create a default group
+                    return self._send_json(200, {
+                        "groups":  [],
+                        "group":   None,
+                        "members": []
+                    })
+
+                target_gid = str(body.get("group_id", "")).strip().upper()
+                if not target_gid or target_gid not in user_gids:
+                    target_gid = user_gids[0]
+
+                result = _get_group_with_members(target_gid)
+                if result:
+                    result["groups"] = _get_user_groups_summary(auth_user_code)
+                    return self._send_json(200, result)
+                return self._send_json(200, {"groups": _get_user_groups_summary(auth_user_code), "group": None, "members": []})
 
             else:
                 return self._send_json(400, {"error": f"Azione '{action}' sconosciuta"})

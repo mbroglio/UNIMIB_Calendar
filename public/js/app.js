@@ -7,8 +7,10 @@ const CALENDAR_CACHE_PREFIX = 'unimib_cal_';
 const FAVORITE_COLORS = ['#8B5CF6', '#10B981', '#06B6D4', '#F59E0B', '#EC4899', '#3B82F6', '#F97316', '#84CC16'];
 
 // Profile / sync keys
-const PROFILE_KEY   = 'unimib_profile_id';   // stores the 8-char profile ID
-const FRIENDS_KEY   = 'unimib_friends';       // stores [{id, nickname, color}]
+const PROFILE_KEY       = 'unimib_profile_id';       // stores { nickname, share_code }
+const SESSION_TOKEN_KEY = 'unimib_session_token';   // stores opaque session token
+const ACTIVE_GROUP_KEY   = 'unimib_active_group_id';  // stores active group ID
+const FRIENDS_KEY       = 'unimib_friends';          // stores [{id, nickname, color}]
 
 // Colors assigned to friends in shared calendar
 const FRIENDS_COLORS = ['#8B5CF6','#10B981','#F59E0B','#EC4899','#3B82F6','#F97316','#06B6D4','#84CC16'];
@@ -70,11 +72,13 @@ let teachersState = {
 
 // Profile state: private credentials (nickname + PIN) & public shareCode
 let profileState = {
-  nickname:  '',
-  shareCode: null,   // public unique calendar code (e.g. K9X2P4)
-  syncing:   false,
-  lastSync:  null,
-  _pin:      null    // in-memory session only
+  nickname:     '',
+  shareCode:    null,   // public unique calendar code (e.g. K9X2P4)
+  sessionToken: null,   // opaque session token st_...
+  recoveryCode: null,   // one-time recovery code REC-XXXX-XXXX
+  syncing:      false,
+  lastSync:     null,
+  _pin:         null    // in-memory session only
 };
 // Property alias so profileState.id maps to profileState.shareCode
 Object.defineProperty(profileState, 'id', {
@@ -82,17 +86,19 @@ Object.defineProperty(profileState, 'id', {
   set(v) { this.shareCode = v; }
 });
 
-// Friends/shared calendar state
+// Friends/shared calendar state supporting multiple groups
 let friendsState = {
-  friends: [],        // [{id, nickname, color, config}]
-  currentMonday: null,
-  events: [],
-  myEvents: [],       // current user's own events (if profile is set)
-  isLoading: false,
-  showMyself: true,   // whether to include the current user's own schedule
-  viewMode: 'grid',   // 'grid' | 'combined' | 'freeSlots' (defaults to hourly grid)
-  selectedGridDate: null, // DD-MM-YYYY selected day for the grid timeline view
-  groupInfo: null     // { id: 'G9X2P4', name: 'Gruppo Studio' }
+  groups:           [],   // user's groups: [{id, name, creator, members_count}]
+  activeGroupId:    localStorage.getItem(ACTIVE_GROUP_KEY) || null, // currently selected group ID
+  groupInfo:        null, // { id: 'G9X2P4', name: 'Gruppo Studio' }
+  friends:          [],   // [{id, share_code, nickname, color, config}]
+  currentMonday:    null,
+  events:           [],
+  myEvents:         [],   // current user's own events (if profile is set)
+  isLoading:        false,
+  showMyself:       true, // whether to include the current user's own schedule
+  viewMode:         'grid', // 'grid' | 'combined' | 'freeSlots' (defaults to hourly grid)
+  selectedGridDate: null  // DD-MM-YYYY selected day for the grid timeline view
 };
 
 // Options loaded from the UNIMIB dropdown data while the setup modal is open
@@ -240,6 +246,61 @@ function setupEventListeners() {
       });
     }
   });
+
+  // Recovery form buttons
+  const btnShowRecover = document.getElementById('btnShowRecoverForm');
+  if (btnShowRecover) btnShowRecover.addEventListener('click', showProfileRecoverForm);
+  const btnBackLogin = document.getElementById('btnBackToLoginFromRecover');
+  if (btnBackLogin) btnBackLogin.addEventListener('click', hideProfileRecoverForm);
+  const btnSubmitRecover = document.getElementById('btnSubmitRecoverPin');
+  if (btnSubmitRecover) btnSubmitRecover.addEventListener('click', handleRecoverPin);
+  const btnCopyRec = document.getElementById('btnCopyRecoveryCode');
+  if (btnCopyRec) btnCopyRec.addEventListener('click', () => {
+    if (profileState.recoveryCode) {
+      copyGroupUrlToClipboard(profileState.recoveryCode);
+      showToast('Codice di recupero copiato! 📋');
+    }
+  });
+
+  // Multi-group management buttons
+  const grpSelect = document.getElementById('friendsGroupSelect');
+  if (grpSelect) grpSelect.addEventListener('change', (e) => switchActiveGroup(e.target.value));
+
+  const btnNewGrp = document.getElementById('btnNewGroup');
+  if (btnNewGrp) btnNewGrp.addEventListener('click', openCreateGroupModal);
+  const btnEmptyNewGrp = document.getElementById('btnEmptyCreateGroup');
+  if (btnEmptyNewGrp) btnEmptyNewGrp.addEventListener('click', openCreateGroupModal);
+  const btnCloseCreateGrp = document.getElementById('btnCloseCreateGroup');
+  if (btnCloseCreateGrp) btnCloseCreateGrp.addEventListener('click', closeCreateGroupModal);
+  const btnConfirmCreateGrp = document.getElementById('btnConfirmCreateGroup');
+  if (btnConfirmCreateGrp) btnConfirmCreateGrp.addEventListener('click', confirmCreateGroup);
+
+  const btnJoinGrpModal = document.getElementById('btnJoinGroupModal');
+  if (btnJoinGrpModal) btnJoinGrpModal.addEventListener('click', openJoinGroupModal);
+  const btnEmptyJoinGrp = document.getElementById('btnEmptyJoinGroup');
+  if (btnEmptyJoinGrp) btnEmptyJoinGrp.addEventListener('click', openJoinGroupModal);
+  const btnCloseJoinGrp = document.getElementById('btnCloseJoinGroup');
+  if (btnCloseJoinGrp) btnCloseJoinGrp.addEventListener('click', closeJoinGroupModal);
+  const btnConfirmJoinGrp = document.getElementById('btnConfirmJoinGroup');
+  if (btnConfirmJoinGrp) btnConfirmJoinGrp.addEventListener('click', confirmJoinGroup);
+
+  const btnRenameGrp = document.getElementById('btnRenameGroup');
+  if (btnRenameGrp) btnRenameGrp.addEventListener('click', openRenameGroupModal);
+  const btnCloseRenameGrp = document.getElementById('btnCloseRenameGroup');
+  if (btnCloseRenameGrp) btnCloseRenameGrp.addEventListener('click', closeRenameGroupModal);
+  const btnConfirmRenameGrp = document.getElementById('btnConfirmRenameGroup');
+  if (btnConfirmRenameGrp) btnConfirmRenameGrp.addEventListener('click', confirmRenameGroup);
+
+  const btnLeaveGrp = document.getElementById('btnLeaveGroup');
+  if (btnLeaveGrp) btnLeaveGrp.addEventListener('click', handleLeaveGroup);
+
+  // Enter key support for modal inputs
+  const createGrpInp = document.getElementById('createGroupNameInput');
+  if (createGrpInp) createGrpInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmCreateGroup(); });
+  const renameGrpInp = document.getElementById('renameGroupNameInput');
+  if (renameGrpInp) renameGrpInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmRenameGroup(); });
+  const joinGrpInp = document.getElementById('joinGroupCodeInput');
+  if (joinGrpInp) joinGrpInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmJoinGroup(); });
 
   // Friends / shared calendar buttons
   document.getElementById('btnAddFriend').addEventListener('click', openAddFriendModal);
@@ -588,8 +649,8 @@ function saveConfig(cfg) {
   } catch (e) {
     console.warn('Config save error', e);
   }
-  // Background sync to cloud profile if logged in and PIN is in session memory
-  if (profileState.id && profileState._pin) {
+  // Background sync to cloud profile if logged in
+  if (profileState.id && (profileState.sessionToken || profileState._pin)) {
     _syncConfigToProfile().catch(e => console.warn('Profile sync error:', e));
   }
 }
@@ -996,10 +1057,12 @@ async function saveSetup() {
         return;
       }
 
-      profileState.nickname  = data.nickname;
-      profileState.shareCode = data.share_code;
-      profileState.lastSync  = Date.now();
-      profileState._pin      = setup._pendingProfile.pin;
+      profileState.nickname     = data.nickname;
+      profileState.shareCode    = data.share_code;
+      profileState.sessionToken = data.session_token || null;
+      profileState.recoveryCode = data.recovery_code || null;
+      profileState.lastSync     = Date.now();
+      profileState._pin         = setup._pendingProfile.pin;
       saveProfileLocally();
       syncGroupCloud();
 
@@ -2710,7 +2773,7 @@ function saveExamCourses(courses) {
   } catch (e) {
     console.warn('Error saving exam courses', e);
   }
-  if (profileState.id && profileState._pin) {
+  if (profileState.id && (profileState.sessionToken || profileState._pin)) {
     _syncConfigToProfile().catch(e => console.warn('Profile sync error:', e));
   }
 }
@@ -3153,10 +3216,21 @@ function initProfile() {
   if (stored) {
     try {
       const parsed = JSON.parse(stored);
-      profileState.nickname  = parsed.nickname || '';
-      profileState.shareCode = parsed.share_code || parsed.shareCode || parsed.id || null;
-    } catch (e) { /* ignore */ }
+      if (typeof parsed === 'object' && parsed !== null) {
+        profileState.nickname     = parsed.nickname || '';
+        profileState.shareCode    = parsed.share_code || parsed.shareCode || parsed.id || null;
+        profileState.recoveryCode = parsed.recovery_code || null;
+      } else if (typeof parsed === 'string') {
+        profileState.shareCode = parsed;
+        profileState.nickname  = parsed;
+      }
+    } catch (e) {
+      // Legacy plain-text ID string (e.g. "mario123")
+      profileState.shareCode = stored.trim();
+      profileState.nickname  = stored.trim();
+    }
   }
+  profileState.sessionToken = localStorage.getItem(SESSION_TOKEN_KEY) || null;
   updateProfileButton();
 }
 
@@ -3173,11 +3247,17 @@ function updateProfileButton() {
 function saveProfileLocally() {
   if (profileState.shareCode) {
     localStorage.setItem(PROFILE_KEY, JSON.stringify({
-      nickname:   profileState.nickname,
-      share_code: profileState.shareCode
+      nickname:      profileState.nickname,
+      share_code:    profileState.shareCode,
+      recovery_code: profileState.recoveryCode || null
     }));
   } else {
     localStorage.removeItem(PROFILE_KEY);
+  }
+  if (profileState.sessionToken) {
+    localStorage.setItem(SESSION_TOKEN_KEY, profileState.sessionToken);
+  } else {
+    localStorage.removeItem(SESSION_TOKEN_KEY);
   }
   updateProfileButton();
 }
@@ -3200,6 +3280,17 @@ function renderProfileModal() {
     document.getElementById('profileSyncText').textContent        = profileState.lastSync
       ? `Sincronizzato il ${new Date(profileState.lastSync).toLocaleTimeString('it-IT')}`
       : 'Non ancora sincronizzato';
+
+    const recBox = document.getElementById('profileRecoveryCodeBox');
+    const recDisplay = document.getElementById('profileRecoveryCodeDisplay');
+    if (recBox && recDisplay) {
+      if (profileState.recoveryCode) {
+        recDisplay.textContent = profileState.recoveryCode;
+        recBox.style.display = '';
+      } else {
+        recBox.style.display = 'none';
+      }
+    }
   } else {
     // Reset forms
     showProfileTab('create');
@@ -3211,6 +3302,14 @@ function renderProfileModal() {
     if (loginNickEl) loginNickEl.value = '';
     document.getElementById('profileLoginPin').value    = '';
     document.getElementById('profileLoginError').style.display  = 'none';
+
+    // Hide recovery form and show login form if user switches back
+    const recForm = document.getElementById('profileRecoverForm');
+    if (recForm) recForm.style.display = 'none';
+    const loginForm = document.getElementById('profileLoginForm');
+    if (loginForm && document.getElementById('profileTabLogin').classList.contains('active')) {
+      loginForm.style.display = '';
+    }
 
     // Existing Course info box (shown if state.config is already set)
     const configBox = document.getElementById('profileCurrentConfigBox');
@@ -3249,6 +3348,8 @@ function renderProfileModal() {
 function showProfileTab(tab) {
   document.getElementById('profileCreateForm').style.display = tab === 'create' ? '' : 'none';
   document.getElementById('profileLoginForm').style.display  = tab === 'login'  ? '' : 'none';
+  const recForm = document.getElementById('profileRecoverForm');
+  if (recForm) recForm.style.display = 'none';
   document.getElementById('profileTabCreate').classList.toggle('active', tab === 'create');
   document.getElementById('profileTabLogin').classList.toggle('active', tab === 'login');
 }
@@ -3329,10 +3430,12 @@ async function handleCreateWithExistingConfig() {
       }
       return;
     }
-    profileState.nickname  = data.nickname;
-    profileState.shareCode = data.share_code;
-    profileState.lastSync  = Date.now();
-    profileState._pin      = creds.pin;
+    profileState.nickname     = data.nickname;
+    profileState.shareCode    = data.share_code;
+    profileState.sessionToken = data.session_token || null;
+    profileState.recoveryCode = data.recovery_code || null;
+    profileState.lastSync     = Date.now();
+    profileState._pin         = creds.pin;
     saveProfileLocally();
     syncGroupCloud();
     renderProfileModal();
@@ -3410,7 +3513,12 @@ async function handleLoginProfile() {
       return;
     }
     if (resp.status === 403) {
-      errEl.textContent = 'PIN non corretto.';
+      errEl.textContent = data.error || 'PIN non corretto.';
+      errEl.style.display = '';
+      return;
+    }
+    if (resp.status === 429) {
+      errEl.textContent = data.error || 'Troppi tentativi falliti. Riprova tra 10 minuti.';
       errEl.style.display = '';
       return;
     }
@@ -3434,10 +3542,14 @@ async function handleLoginProfile() {
       saveExamCourses(examsState.extraCourses);
     }
 
-    profileState.nickname  = data.nickname;
-    profileState.shareCode = data.share_code;
-    profileState.lastSync  = Date.now();
-    profileState._pin      = pin;  // session-only, for background auto-sync
+    profileState.nickname     = data.nickname;
+    profileState.shareCode    = data.share_code;
+    profileState.sessionToken = data.session_token || null;
+    if (data.recovery_code) {
+      profileState.recoveryCode = data.recovery_code;
+    }
+    profileState.lastSync     = Date.now();
+    profileState._pin         = pin;
     saveProfileLocally();
     syncGroupCloud();
     renderProfileModal();
@@ -3455,13 +3567,122 @@ async function handleLoginProfile() {
   }
 }
 
+function showProfileRecoverForm() {
+  const loginForm = document.getElementById('profileLoginForm');
+  const recForm = document.getElementById('profileRecoverForm');
+  if (loginForm) loginForm.style.display = 'none';
+  if (recForm) recForm.style.display = '';
+  const errEl = document.getElementById('profileRecoverError');
+  if (errEl) errEl.style.display = 'none';
+  const nickInput = document.getElementById('profileRecoverNickname');
+  const loginNick = document.getElementById('profileLoginNickname');
+  if (nickInput && loginNick && loginNick.value) {
+    nickInput.value = loginNick.value;
+  }
+}
+
+function hideProfileRecoverForm() {
+  const recForm = document.getElementById('profileRecoverForm');
+  const loginForm = document.getElementById('profileLoginForm');
+  if (recForm) recForm.style.display = 'none';
+  if (loginForm) loginForm.style.display = '';
+}
+
+async function handleRecoverPin() {
+  const nick = (document.getElementById('profileRecoverNickname').value || '').trim();
+  const code = (document.getElementById('profileRecoverCode').value || '').trim();
+  const pin = (document.getElementById('profileRecoverNewPin').value || '').trim();
+  const pinConf = (document.getElementById('profileRecoverNewPinConfirm').value || '').trim();
+  const errEl = document.getElementById('profileRecoverError');
+
+  if (errEl) errEl.style.display = 'none';
+
+  if (!nick) {
+    if (errEl) { errEl.textContent = 'Inserisci il tuo soprannome.'; errEl.style.display = ''; }
+    return;
+  }
+  if (!code) {
+    if (errEl) { errEl.textContent = 'Inserisci il tuo codice di recupero (REC-XXXX-XXXX).'; errEl.style.display = ''; }
+    return;
+  }
+  if (!pin || pin.length < 4 || pin.length > 8 || !/^\d+$/.test(pin)) {
+    if (errEl) { errEl.textContent = 'Il nuovo PIN deve essere formato da 4 a 8 cifre numeriche.'; errEl.style.display = ''; }
+    return;
+  }
+  if (pin !== pinConf) {
+    if (errEl) { errEl.textContent = 'I PIN non corrispondono.'; errEl.style.display = ''; }
+    return;
+  }
+
+  const btn = document.getElementById('btnSubmitRecoverPin');
+  const oldText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Reimpostazione in corso...'; }
+
+  try {
+    const resp = await fetch('/api/profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'reset_pin',
+        nickname: nick,
+        recovery_code: code,
+        new_pin: pin
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (errEl) {
+        errEl.textContent = data.error || 'Errore durante il recupero.';
+        errEl.style.display = '';
+      }
+      return;
+    }
+
+    profileState.nickname     = data.nickname;
+    profileState.shareCode    = data.share_code;
+    profileState.sessionToken = data.session_token || null;
+    profileState.recoveryCode = data.recovery_code || null;
+    profileState.lastSync     = Date.now();
+    profileState._pin         = pin;
+    saveProfileLocally();
+    syncGroupCloud();
+    renderProfileModal();
+    showToast(`PIN reimpostato con successo! 🎉 Nuovo codice: ${data.recovery_code}`, 6000);
+    setTimeout(() => {
+      document.getElementById('profileModal').classList.remove('active');
+    }, 1200);
+  } catch (e) {
+    if (errEl) { errEl.textContent = 'Errore di connessione.'; errEl.style.display = ''; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = oldText; }
+  }
+}
+
 function handleLogoutProfile() {
-  profileState.shareCode = null;
-  profileState.nickname  = '';
-  profileState.lastSync  = null;
-  profileState._pin      = null;
+  if (profileState.sessionToken) {
+    fetch('/api/profile', {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${profileState.sessionToken}` }
+    }).catch(() => {});
+  }
+  profileState.shareCode    = null;
+  profileState.nickname     = '';
+  profileState.sessionToken = null;
+  profileState.recoveryCode = null;
+  profileState.lastSync     = null;
+  profileState._pin         = null;
+  localStorage.removeItem(SESSION_TOKEN_KEY);
+  localStorage.removeItem(ACTIVE_GROUP_KEY);
   saveProfileLocally();
+  friendsState.groups        = [];
+  friendsState.activeGroupId = null;
+  friendsState.groupInfo     = null;
+  friendsState.friends       = [];
+  friendsState.events        = [];
   renderProfileModal();
+  renderGroupSwitcher();
+  renderFriendChips();
+  renderFriendsView();
   showToast('Profilo rimosso da questo dispositivo');
 }
 
@@ -3501,7 +3722,7 @@ async function syncProfileNow() {
   text.textContent = 'Sincronizzazione...';
 
   try {
-    if (profileState._pin) {
+    if (profileState.sessionToken || profileState._pin) {
       await _syncConfigToProfile();
       text.textContent = `Sincronizzato alle ${new Date().toLocaleTimeString('it-IT')}`;
       showToast('Profilo sincronizzato ✅');
@@ -3524,88 +3745,71 @@ async function syncProfileNow() {
 }
 
 async function _syncConfigToProfile() {
-  if (!profileState.nickname || !profileState._pin) return;
+  if (!profileState.nickname || (!profileState.sessionToken && !profileState._pin)) return;
+  const headers = { 'Content-Type': 'application/json' };
+  if (profileState.sessionToken) {
+    headers['Authorization'] = `Bearer ${profileState.sessionToken}`;
+  }
+  const body = {
+    nickname:     profileState.nickname,
+    config:       state.config || null,
+    exam_courses: examsState.extraCourses || []
+  };
+  if (profileState._pin) {
+    body.pin = profileState._pin;
+  }
   const resp = await fetch('/api/profile', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      nickname:     profileState.nickname,
-      pin:          profileState._pin,
-      config:       state.config || null,
-      exam_courses: examsState.extraCourses || []
-    })
+    headers,
+    body: JSON.stringify(body)
   });
   if (resp.ok) {
+    const data = await resp.json();
+    if (data.session_token) {
+      profileState.sessionToken = data.session_token;
+    }
     profileState.lastSync = Date.now();
+    saveProfileLocally();
+  } else if (resp.status === 401) {
+    profileState.sessionToken = null;
     saveProfileLocally();
   }
 }
 
 
-// ══════════════════════════════════════════════════════════════
-//  FRIENDS / SHARED CALENDAR
-// ══════════════════════════════════════════════════════════════
-
-function loadFriends() {
-  try {
-    const raw = localStorage.getItem(FRIENDS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-function saveFriends(friends) {
-  try {
-    localStorage.setItem(FRIENDS_KEY, JSON.stringify(friends));
-  } catch (e) { /* ignore */ }
-}
-
 /**
- * Cloud Group Sync
- * Keeps local friends list and Redis cloud group in full bidirectional synchronization.
- * When student A adds student B, both A and B are linked to the same cloud group.
+ * Cloud Multi-Group Sync
+ * Keeps local friends list and Redis cloud groups in synchronization.
+ * Supports multiple groups per user and zero-group initial state.
  */
-async function syncGroupCloud() {
-  if (!profileState.shareCode) return;
+async function syncGroupCloud(targetGroupId = null) {
+  if (!profileState.shareCode) {
+    renderGroupSwitcher();
+    return;
+  }
   const myCode = profileState.shareCode.toUpperCase();
+  const gid = targetGroupId || friendsState.activeGroupId || '';
 
   try {
-    const localFriendCodes = friendsState.friends
-      .map(f => f.share_code || f.id)
-      .filter(Boolean)
-      .map(c => c.toUpperCase())
-      .filter(c => c !== myCode);
-
-    let groupData = null;
-
-    if (localFriendCodes.length > 0) {
-      // Sync local friends to cloud group so friends are also joined to me in Redis
-      const resp = await fetch('/api/group', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'sync',
-          user_code: myCode,
-          friend_codes: localFriendCodes
-        })
-      });
-      if (resp.ok) {
-        groupData = await resp.json();
-      }
-    } else {
-      // Fetch cloud group
-      const resp = await fetch(`/api/group?user=${encodeURIComponent(myCode)}`);
-      if (resp.ok) {
-        groupData = await resp.json();
-      }
+    const url = `/api/group?user=${encodeURIComponent(myCode)}${gid ? `&group_id=${encodeURIComponent(gid)}` : ''}`;
+    const headers = {};
+    if (profileState.sessionToken) {
+      headers['Authorization'] = `Bearer ${profileState.sessionToken}`;
     }
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) return;
 
-    if (groupData && groupData.group && Array.isArray(groupData.members)) {
-      friendsState.groupInfo = groupData.group;
+    const data = await resp.json();
+    friendsState.groups = Array.isArray(data.groups) ? data.groups : [];
 
-      // Extract all members EXCEPT myself
-      const otherMembers = groupData.members.filter(m => (m.share_code || m.id || '').toUpperCase() !== myCode);
+    if (data.group && data.group.id) {
+      friendsState.groupInfo = data.group;
+      friendsState.activeGroupId = data.group.id;
+      localStorage.setItem(ACTIVE_GROUP_KEY, data.group.id);
+
+      const otherMembers = (data.members || []).filter(m =>
+        (m.share_code || m.id || '').toUpperCase() !== myCode
+      );
 
       friendsState.friends = otherMembers.map((m, idx) => ({
         id:         m.share_code || m.id,
@@ -3614,13 +3818,361 @@ async function syncGroupCloud() {
         config:     m.config,
         color:      m.color || FRIENDS_COLORS[idx % FRIENDS_COLORS.length]
       }));
-
       saveFriends(friendsState.friends);
-      renderFriendChips();
-      updateFriendsGroupHeader();
+    } else {
+      friendsState.groupInfo = null;
+      friendsState.activeGroupId = null;
+      friendsState.friends = [];
+      localStorage.removeItem(ACTIVE_GROUP_KEY);
+      saveFriends([]);
     }
+
+    renderGroupSwitcher();
+    renderFriendChips();
+    updateFriendsGroupHeader();
   } catch (err) {
     console.warn('Group cloud sync error:', err);
+  }
+}
+
+function renderGroupSwitcher() {
+  const select = document.getElementById('friendsGroupSelect');
+  const noGroupsState = document.getElementById('friendsNoGroupsState');
+  const activeContainer = document.getElementById('friendsActiveGroupContainer');
+  const btnRename = document.getElementById('btnRenameGroup');
+  const btnLeave  = document.getElementById('btnLeaveGroup');
+
+  const hasGroups = friendsState.groups && friendsState.groups.length > 0;
+
+  if (noGroupsState && activeContainer) {
+    if (hasGroups) {
+      noGroupsState.style.display = 'none';
+      activeContainer.style.display = '';
+    } else {
+      noGroupsState.style.display = '';
+      activeContainer.style.display = 'none';
+    }
+  }
+
+  if (btnRename) btnRename.disabled = !hasGroups;
+  if (btnLeave)  btnLeave.disabled  = !hasGroups;
+
+  if (!select) return;
+
+  if (!hasGroups) {
+    select.innerHTML = '<option value="">Nessun gruppo</option>';
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
+  select.innerHTML = friendsState.groups.map(g => {
+    const isSelected = g.id === friendsState.activeGroupId ? 'selected' : '';
+    const memberLabel = g.members_count === 1 ? '1 membro' : `${g.members_count} membri`;
+    return `<option value="${escapeHtml(g.id)}" ${isSelected}>👥 ${escapeHtml(g.name)} (${memberLabel})</option>`;
+  }).join('');
+}
+
+async function switchActiveGroup(groupId) {
+  if (!groupId || groupId === friendsState.activeGroupId) return;
+  friendsState.activeGroupId = groupId;
+  localStorage.setItem(ACTIVE_GROUP_KEY, groupId);
+  friendsState.events = [];
+  friendsState.isLoading = true;
+  renderFriendsView();
+
+  await syncGroupCloud(groupId);
+  await loadFriendsCalendar();
+}
+
+function openCreateGroupModal() {
+  if (!profileState.shareCode) {
+    showToast('Accedi o crea un profilo per creare un gruppo');
+    openProfileModal();
+    return;
+  }
+  const modal = document.getElementById('createGroupModal');
+  if (modal) {
+    modal.classList.add('active');
+    const input = document.getElementById('createGroupNameInput');
+    if (input) { input.value = ''; setTimeout(() => input.focus(), 50); }
+    const err = document.getElementById('createGroupError');
+    if (err) err.style.display = 'none';
+  }
+}
+
+function closeCreateGroupModal() {
+  const modal = document.getElementById('createGroupModal');
+  if (modal) modal.classList.remove('active');
+}
+
+async function confirmCreateGroup() {
+  const input = document.getElementById('createGroupNameInput');
+  const name = (input ? input.value : '').trim();
+  const errEl = document.getElementById('createGroupError');
+
+  if (errEl) errEl.style.display = 'none';
+  if (!name) {
+    if (errEl) { errEl.textContent = 'Inserisci un nome per il gruppo.'; errEl.style.display = ''; }
+    return;
+  }
+
+  const btn = document.getElementById('btnConfirmCreateGroup');
+  const oldText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Creazione in corso...'; }
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (profileState.sessionToken) {
+      headers['Authorization'] = `Bearer ${profileState.sessionToken}`;
+    }
+    const resp = await fetch('/api/group', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        action: 'create_group',
+        name,
+        session_token: profileState.sessionToken
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (errEl) { errEl.textContent = data.error || 'Errore nella creazione del gruppo.'; errEl.style.display = ''; }
+      return;
+    }
+
+    closeCreateGroupModal();
+    friendsState.groups = data.groups || [];
+    friendsState.groupInfo = data.group;
+    friendsState.activeGroupId = data.group.id;
+    localStorage.setItem(ACTIVE_GROUP_KEY, data.group.id);
+    friendsState.friends = [];
+    friendsState.events = [];
+
+    renderGroupSwitcher();
+    renderFriendChips();
+    updateFriendsGroupHeader();
+    loadFriendsCalendar();
+    showToast(`🎉 Gruppo "${data.group.name}" creato! Codice: ${data.group.id}`, 5000);
+  } catch (e) {
+    if (errEl) { errEl.textContent = 'Errore di connessione.'; errEl.style.display = ''; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = oldText; }
+  }
+}
+
+function openJoinGroupModal() {
+  if (!profileState.shareCode) {
+    showToast('Accedi o crea un profilo per unirti a un gruppo');
+    openProfileModal();
+    return;
+  }
+  const modal = document.getElementById('joinGroupModal');
+  if (modal) {
+    modal.classList.add('active');
+    const input = document.getElementById('joinGroupCodeInput');
+    if (input) { input.value = ''; setTimeout(() => input.focus(), 50); }
+    const err = document.getElementById('joinGroupError');
+    if (err) err.style.display = 'none';
+  }
+}
+
+function closeJoinGroupModal() {
+  const modal = document.getElementById('joinGroupModal');
+  if (modal) modal.classList.remove('active');
+}
+
+async function confirmJoinGroup() {
+  const input = document.getElementById('joinGroupCodeInput');
+  const code = (input ? input.value : '').trim().toUpperCase();
+  const errEl = document.getElementById('joinGroupError');
+
+  if (errEl) errEl.style.display = 'none';
+  if (code.length < 3) {
+    if (errEl) { errEl.textContent = 'Inserisci un codice gruppo valido (es. G7K2P9).'; errEl.style.display = ''; }
+    return;
+  }
+
+  const btn = document.getElementById('btnConfirmJoinGroup');
+  const oldText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Accesso in corso...'; }
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (profileState.sessionToken) {
+      headers['Authorization'] = `Bearer ${profileState.sessionToken}`;
+    }
+    const resp = await fetch('/api/group', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        action: 'join_group',
+        group_id: code,
+        session_token: profileState.sessionToken
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (errEl) { errEl.textContent = data.error || 'Codice gruppo non trovato.'; errEl.style.display = ''; }
+      return;
+    }
+
+    closeJoinGroupModal();
+    friendsState.groups = data.groups || [];
+    friendsState.groupInfo = data.group;
+    friendsState.activeGroupId = data.group.id;
+    localStorage.setItem(ACTIVE_GROUP_KEY, data.group.id);
+
+    const myCode = (profileState.shareCode || '').toUpperCase();
+    const otherMembers = (data.members || []).filter(m => (m.share_code || m.id || '').toUpperCase() !== myCode);
+    friendsState.friends = otherMembers.map((m, idx) => ({
+      id:         m.share_code || m.id,
+      share_code: m.share_code || m.id,
+      nickname:   m.nickname || m.id,
+      config:     m.config,
+      color:      m.color || FRIENDS_COLORS[idx % FRIENDS_COLORS.length]
+    }));
+
+    friendsState.events = [];
+    renderGroupSwitcher();
+    renderFriendChips();
+    updateFriendsGroupHeader();
+    loadFriendsCalendar();
+    showToast(`Ti sei unito al gruppo "${data.group.name}"! 🎉`);
+  } catch (e) {
+    if (errEl) { errEl.textContent = 'Errore di connessione.'; errEl.style.display = ''; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = oldText; }
+  }
+}
+
+function openRenameGroupModal() {
+  if (!friendsState.activeGroupId || !friendsState.groupInfo) {
+    showToast('Nessun gruppo selezionato');
+    return;
+  }
+  const modal = document.getElementById('renameGroupModal');
+  if (modal) {
+    modal.classList.add('active');
+    const input = document.getElementById('renameGroupNameInput');
+    if (input) {
+      input.value = friendsState.groupInfo.name || '';
+      setTimeout(() => input.focus(), 50);
+    }
+    const err = document.getElementById('renameGroupError');
+    if (err) err.style.display = 'none';
+  }
+}
+
+function closeRenameGroupModal() {
+  const modal = document.getElementById('renameGroupModal');
+  if (modal) modal.classList.remove('active');
+}
+
+async function confirmRenameGroup() {
+  const input = document.getElementById('renameGroupNameInput');
+  const newName = (input ? input.value : '').trim();
+  const errEl = document.getElementById('renameGroupError');
+
+  if (errEl) errEl.style.display = 'none';
+  if (!newName) {
+    if (errEl) { errEl.textContent = 'Inserisci un nome valido per il gruppo.'; errEl.style.display = ''; }
+    return;
+  }
+
+  const btn = document.getElementById('btnConfirmRenameGroup');
+  const oldText = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvataggio...'; }
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (profileState.sessionToken) {
+      headers['Authorization'] = `Bearer ${profileState.sessionToken}`;
+    }
+    const resp = await fetch('/api/group', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        action: 'rename_group',
+        group_id: friendsState.activeGroupId,
+        name: newName,
+        session_token: profileState.sessionToken
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (errEl) { errEl.textContent = data.error || 'Errore nella rinomina.'; errEl.style.display = ''; }
+      return;
+    }
+
+    closeRenameGroupModal();
+    if (data.group) {
+      friendsState.groupInfo = data.group;
+    }
+    if (data.groups) {
+      friendsState.groups = data.groups;
+    }
+    renderGroupSwitcher();
+    updateFriendsGroupHeader();
+    showToast('Gruppo rinominato ✅');
+  } catch (e) {
+    if (errEl) { errEl.textContent = 'Errore di connessione.'; errEl.style.display = ''; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = oldText; }
+  }
+}
+
+async function handleLeaveGroup() {
+  if (!friendsState.activeGroupId || !friendsState.groupInfo) {
+    showToast('Nessun gruppo selezionato');
+    return;
+  }
+  const groupName = friendsState.groupInfo.name || 'questo gruppo';
+  if (!confirm(`Sei sicuro di voler uscire da "${groupName}"?`)) {
+    return;
+  }
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (profileState.sessionToken) {
+      headers['Authorization'] = `Bearer ${profileState.sessionToken}`;
+    }
+    const resp = await fetch('/api/group', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        action: 'leave_group',
+        group_id: friendsState.activeGroupId,
+        session_token: profileState.sessionToken
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      showToast(data.error || "Errore durante l'uscita dal gruppo");
+      return;
+    }
+
+    friendsState.groups = data.groups || [];
+    if (friendsState.groups.length > 0) {
+      const nextGid = friendsState.groups[0].id;
+      friendsState.activeGroupId = nextGid;
+      localStorage.setItem(ACTIVE_GROUP_KEY, nextGid);
+      await syncGroupCloud(nextGid);
+      await loadFriendsCalendar();
+    } else {
+      friendsState.activeGroupId = null;
+      friendsState.groupInfo = null;
+      friendsState.friends = [];
+      friendsState.events = [];
+      localStorage.removeItem(ACTIVE_GROUP_KEY);
+      renderGroupSwitcher();
+      renderFriendChips();
+      updateFriendsGroupHeader();
+      renderFriendsView();
+    }
+    showToast(`Sei uscito dal gruppo "${groupName}"`);
+  } catch (e) {
+    showToast('Errore di connessione');
   }
 }
 
@@ -3655,7 +4207,7 @@ function openAddFriendModal() {
   const confBtn = document.getElementById('btnConfirmAddFriendCode');
   if (confBtn) {
     confBtn.disabled = true;
-    confBtn.textContent = '+ Aggiungi';
+    confBtn.textContent = '+ Aggiungi al gruppo';
     confBtn._foundProfile = null;
   }
 }
@@ -3682,7 +4234,7 @@ async function lookupFriendByCode() {
   if (prev) prev.style.display   = 'none';
   if (confBtn) {
     confBtn.disabled = true;
-    confBtn.textContent = '+ Aggiungi';
+    confBtn.textContent = '+ Aggiungi al gruppo';
     confBtn._foundProfile = null;
   }
 
@@ -3791,7 +4343,7 @@ function confirmAddFriendByCode() {
   if (btn) {
     btn._foundProfile = null;
     btn.disabled = true;
-    btn.textContent = '+ Aggiungi';
+    btn.textContent = '+ Aggiungi al gruppo';
   }
 
   const input = document.getElementById('friendCodeInput');
@@ -3802,7 +4354,7 @@ function confirmAddFriendByCode() {
   if (err) err.style.display = 'none';
 
   if (!profileState.shareCode) {
-    showToast("Nota: crea o accedi col tuo profilo per permettere al tuo amico di vedere i tuoi orari!", 4500);
+    showToast("Nota: crea o accedi col tuo profilo per salvare i tuoi gruppi nel cloud!", 4500);
   }
 
   if (profile.isGroup) {
@@ -3819,21 +4371,33 @@ async function handleJoinGroup(groupProfile) {
   const myCode = (profileState.shareCode || '').toUpperCase();
   if (myCode) {
     try {
-      await fetch('/api/group', {
+      const headers = { 'Content-Type': 'application/json' };
+      if (profileState.sessionToken) {
+        headers['Authorization'] = `Bearer ${profileState.sessionToken}`;
+      }
+      const resp = await fetch('/api/group', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           action: 'join_group',
           user_code: myCode,
-          group_id: groupProfile.group_id
+          group_id: groupProfile.group_id,
+          session_token: profileState.sessionToken
         })
       });
+      if (resp.ok) {
+        const data = await resp.json();
+        friendsState.groups = data.groups || [];
+      }
     } catch (e) {
       console.warn('Error joining group on server:', e);
     }
   }
 
   friendsState.groupInfo = { id: groupProfile.group_id, name: groupProfile.group_name };
+  friendsState.activeGroupId = groupProfile.group_id;
+  localStorage.setItem(ACTIVE_GROUP_KEY, groupProfile.group_id);
+
   friendsState.friends = (groupProfile.members || [])
     .filter(m => (m.share_code || m.id || '').toUpperCase() !== myCode)
     .map((m, idx) => ({
@@ -3845,6 +4409,7 @@ async function handleJoinGroup(groupProfile) {
     }));
 
   saveFriends(friendsState.friends);
+  renderGroupSwitcher();
   renderFriendChips();
   updateFriendsGroupHeader();
   friendsState.events = [];
@@ -3871,25 +4436,70 @@ async function _addFriend({ id, nickname }) {
     showToast(`${nickname} è già nel gruppo`);
     return;
   }
+
+  // If no group is currently active, prompt or auto-create a new group with this friend
+  if (!friendsState.activeGroupId) {
+    if (!profileState.shareCode) {
+      const colorIndex = friendsState.friends.length % FRIENDS_COLORS.length;
+      const color      = FRIENDS_COLORS[colorIndex];
+      friendsState.friends.push({ id, nickname, color });
+      saveFriends(friendsState.friends);
+      friendsState.events = [];
+      renderFriendChips();
+      showToast(`${nickname} aggiunto! Crea o accedi a un profilo per salvare il gruppo nel cloud ☁️`);
+      loadFriendsCalendar();
+      return;
+    }
+    // Create new group automatically for this friend
+    try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (profileState.sessionToken) {
+        headers['Authorization'] = `Bearer ${profileState.sessionToken}`;
+      }
+      const cResp = await fetch('/api/group', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          action: 'create_group',
+          name: `Gruppo con ${nickname}`,
+          session_token: profileState.sessionToken
+        })
+      });
+      if (cResp.ok) {
+        const cData = await cResp.json();
+        friendsState.groups = cData.groups || [];
+        friendsState.groupInfo = cData.group;
+        friendsState.activeGroupId = cData.group.id;
+        localStorage.setItem(ACTIVE_GROUP_KEY, cData.group.id);
+      }
+    } catch (e) {
+      console.warn('Auto create group error:', e);
+    }
+  }
+
   const colorIndex = friendsState.friends.length % FRIENDS_COLORS.length;
   const color      = FRIENDS_COLORS[colorIndex];
   friendsState.friends.push({ id, nickname, color });
   saveFriends(friendsState.friends);
-  // Clear cached events so next view forces a reload
   friendsState.events = [];
   renderFriendChips();
   showToast(`${nickname} aggiunto al gruppo! 🎉`);
 
-  // Cloud sync to join friend to group in Redis
-  if (profileState.shareCode) {
+  // Cloud sync to join friend to active group in Redis
+  if (profileState.shareCode && friendsState.activeGroupId) {
     try {
+      const headers = { 'Content-Type': 'application/json' };
+      if (profileState.sessionToken) {
+        headers['Authorization'] = `Bearer ${profileState.sessionToken}`;
+      }
       const resp = await fetch('/api/group', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           action: 'add_member',
-          user_code: profileState.shareCode.toUpperCase(),
-          friend_code: id.toUpperCase()
+          group_id: friendsState.activeGroupId,
+          friend_code: id.toUpperCase(),
+          session_token: profileState.sessionToken
         })
       });
       if (resp.ok) {
@@ -3898,13 +4508,16 @@ async function _addFriend({ id, nickname }) {
           friendsState.groupInfo = data.group;
           updateFriendsGroupHeader();
         }
+        if (data && data.groups) {
+          friendsState.groups = data.groups;
+          renderGroupSwitcher();
+        }
       }
     } catch (err) {
       console.warn('Cloud group add member error:', err);
     }
   }
 
-  // If we're already on the friends tab, reload
   if (state.activeTab === 'friends') {
     loadFriendsCalendar();
   }
@@ -3912,22 +4525,25 @@ async function _addFriend({ id, nickname }) {
 
 function removeFriend(id) {
   friendsState.friends = friendsState.friends.filter(f => f.id !== id);
-  saveFriends(friendsState.friends);
   friendsState.friends.forEach((f, i) => { f.color = FRIENDS_COLORS[i % FRIENDS_COLORS.length]; });
   saveFriends(friendsState.friends);
   friendsState.events   = [];
   friendsState.myEvents = [];
   renderFriendChips();
 
-  // Cloud sync to remove friend from group in Redis
-  if (profileState.shareCode) {
+  if (profileState.shareCode && friendsState.activeGroupId) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (profileState.sessionToken) {
+      headers['Authorization'] = `Bearer ${profileState.sessionToken}`;
+    }
     fetch('/api/group', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         action: 'remove_member',
-        user_code: profileState.shareCode.toUpperCase(),
-        remove_code: id.toUpperCase()
+        group_id: friendsState.activeGroupId,
+        remove_code: id.toUpperCase(),
+        session_token: profileState.sessionToken
       })
     })
     .then(r => r.json())
@@ -3936,11 +4552,14 @@ function removeFriend(id) {
         friendsState.groupInfo = data.group;
         updateFriendsGroupHeader();
       }
+      if (data && data.groups) {
+        friendsState.groups = data.groups;
+        renderGroupSwitcher();
+      }
     })
     .catch(err => console.warn('Cloud group remove member error:', err));
   }
 
-  // If any members remain (friends or self), reload the calendar; otherwise just re-render
   const hasFriends = friendsState.friends.length > 0;
   const hasMyself  = friendsState.showMyself && profileState.shareCode && state.config;
   if (hasFriends || hasMyself) {
@@ -4828,7 +5447,7 @@ async function handleSharedGroupUrl(groupStr) {
     const fetchPromises = codes.map(async code => {
       const isSelf = (profileState.shareCode && code === profileState.shareCode.toUpperCase()) ||
                      (profileState.nickname && code.toLowerCase() === profileState.nickname.toLowerCase());
-      if (friendsState.friends.some(f => (f.id || '').toUpperCase() === code) || isSelf) return;
+      if (friendsState.friends.some(f => (f.id || '').toUpperCase() === code) || isSelf) return null;
       try {
         let resp = await fetch(`/api/profile?code=${encodeURIComponent(code)}`);
         if (!resp.ok) {
@@ -4838,33 +5457,24 @@ async function handleSharedGroupUrl(groupStr) {
           const profile = await resp.json();
           const friendId   = profile.share_code || profile.id || code;
           const friendNick = profile.nickname || friendId;
-          if (!friendsState.friends.some(f => (f.id || '').toUpperCase() === friendId.toUpperCase())) {
-            const colorIndex = friendsState.friends.length % FRIENDS_COLORS.length;
-            friendsState.friends.push({
-              id: friendId,
-              nickname: friendNick,
-              color: FRIENDS_COLORS[colorIndex]
-            });
-          }
+          return { id: friendId, nickname: friendNick };
         }
       } catch (err) {
         console.warn('Error fetching group profile:', code, err);
       }
+      return null;
     });
 
-    await Promise.all(fetchPromises);
-
-    saveFriends(friendsState.friends);
-    renderFriendChips();
-
-    // If logged in, sync friends to cloud group in Redis
-    if (profileState.shareCode) {
-      await syncGroupCloud();
+    const newFriends = (await Promise.all(fetchPromises)).filter(Boolean);
+    for (const nf of newFriends) {
+      await _addFriend(nf);
     }
 
     friendsState.isLoading = false;
     loadFriendsCalendar();
-    showToast('Gruppo amici caricato nel calendario! 🎉');
+    if (newFriends.length > 0) {
+      showToast('Gruppo amici caricato nel calendario! 🎉');
+    }
   } finally {
     // Clean URL without reloading page
     history.replaceState(null, '', window.location.pathname);

@@ -41,29 +41,36 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 - **🗓️ Session Filters**: Quick presets for Winter (*Invernale*), Summer (*Estiva*), Autumn (*Autunnale*), or Custom Date Range.
 - **📅 Add to Calendar (.ics)**: Download an `.ics` file for any exam appeal to import it directly into Apple Calendar, Google Calendar, or Outlook.
 
-### 5. 👤 Cloud Profile & Synchronisation (No Complex Passwords)
-- **🔑 Memorable Auth (Nickname + PIN)**: No email or password needed. Create an account with your chosen **Soprannome** (e.g. `Mario`) and a 4-8 digit **PIN** (e.g. `1234`).
-- **📚 Guided Study Plan Onboarding (2-Step Flow)**: When creating a profile, users are immediately guided to select their degree programme, study year, and active teachings (⭐ I miei corsi). If the student has already picked a course as a guest, a 1-tap instant save option (*"Salva profilo con questo corso"*) is also provided.
+### 5. 👤 Cloud Profile & Zero-Friction OWASP Authentication
+- **🔑 Zero-Friction Auth (Nickname + PIN)**: No email or password needed. Create an account with your chosen **Soprannome** (e.g. `Mario`) and a 4-8 digit **PIN** (e.g. `1234`).
+- **🛡️ OWASP-Compliant Security**:
+  - **PBKDF2-HMAC-SHA256**: Key stretching with 100,000 iterations and 16-byte random per-user salt (`pbkdf2:sha256:100000$<salt>$<key>`). Constant-time comparison via `hmac.compare_digest`.
+  - **Automatic Legacy Upgrade**: Transparent backward-compatibility that automatically migrates legacy SHA-256 accounts to PBKDF2 on their next login.
+  - **256-Bit Sliding Session Tokens**: Generates opaque tokens (`st_...`) with a 90-day sliding TTL in Redis. Transmitted via `Authorization: Bearer <token>` and preserved in `localStorage`, enabling secure background study plan synchronization across page refreshes without holding PINs in client storage.
+  - **Brute-Force Rate Limiting**: Enforces a strict threshold of 5 failed attempts per 10-minute window per nickname, returning `HTTP 429 Too Many Requests` on violation.
+  - **One-Time Account Recovery Key**: Issues an unguessable recovery key (`REC-XXXX-XXXX`) at profile registration. Users who forget their PIN can securely reset it via the recovery key without losing their courses or group memberships.
+- **📚 Guided Study Plan Onboarding (2-Step Flow)**: When creating a profile, users are guided to select degree programme, study year, and active teachings (⭐ I miei corsi), or save an existing guest configuration in 1 tap.
 - **📱 Multi-Device Sync**: Log in on any device (iPhone, laptop, tablet) simply by entering your Soprannome and PIN. Your study plan, favorite courses, and monitored exams sync automatically.
-- **⚡ First-Visit Onboarding**: First-time visitors can choose to create a profile, log in to restore an existing plan, or **Continua come ospite** (Guest mode) to start immediately without registration.
-- **☁️ Serverless Storage**: Backed by **Upstash Redis REST API**, salted with SHA-256 for secure PIN verification.
 
-### 6. 👥 Friends Shared Calendar & Synchronized Groups (Gruppi & Calendario Condiviso)
-- **🔒 Privacy First (Zero Leaked Credentials)**: Your personal PIN remains strictly private and is only used to log in on your own devices. The system generates an independent, unique 6-character **Codice Calendario Univoco** (e.g. `K9X2P4`) using unambiguous characters (no `0`, `O`, `1`, `I`).
-- **🤝 Bidirectional Cloud Group Sync**: When you add a friend via their calendar code (or invite them to a group), **both students are automatically linked to the same cloud group in Redis**. The friend automatically sees your timetable and group members on their own device without needing to manually re-enter your code.
-- **🏷️ Unique Group Codes & Links**: Groups receive a persistent group code (e.g. `G7K2P9`) and shareable link (e.g. `/?group=G7K2P9`). Anyone opening the link or entering the code is instantly added to the group for everyone.
-- **⭐ Favorites-Only Sharing**: When viewing a friend's schedule, only the subjects they have personally selected (⭐ I miei corsi) are shown — not their entire degree programme. If no favorites are set, all courses are shown as a fallback.
-- **👤 Include Yourself**: Toggle **"👤 Includi me"** to overlay your own schedule (filtered to your selected subjects) alongside your friends' timetables, shown in teal with a distinct "Io 👤" badge.
-- **🏷️ Merged Shared Courses**: When multiple students in the group attend the same course at the same time, it is displayed as a single consolidated card displaying badges for all attendees (e.g. `[Io 👤] [Mario] [Luca]`), eliminating duplicate cards.
-- **📅 Chronological List View**: Toggle **"📋 Elenco"** to browse all group lectures ordered day-by-day and time-by-time.
-- **📊 Daily Timeline Grid (08:30 – 18:30)**: Toggle **"📊 Vista Oraria"** to see a vertical time grid for any day of the week. Courses fill their vertical time slots, and different courses overlapping in the same hours are automatically packed side-by-side in parallel lanes with a live indicator for the current time.
-- **🟢 Free Slots View (up to 18:30)**: Switch to **"🟢 Slot liberi"** to calculate time windows (≥ 30 min) between 08:30 and 18:30 when **everyone** in the group has no lectures — perfect for finding study breaks, project meetings, or lunch times.
-- **⚡ Background Auto-Sync**: The friends group automatically re-synchronizes when the tab becomes active or visible (`visibilitychange`).
+### 6. 👥 Multi-Group Shared Calendars (Gruppi di Studio & Calendari Condivisi)
+- **👥 Multiple Groups per Student**: Belong to multiple distinct study groups simultaneously (e.g. *"Gruppo Studio Analisi"*, *"Gruppo Progetto Informatica"*, *"Tesi di Laurea"*).
+- **✨ Clean Initial State**: New profiles start with zero groups (`[]`), presenting an empty state with two intuitive actions: **"+ Crea un gruppo"** or **"🤝 Unisciti con un codice"**.
+- **🔄 Instant Group Switcher**: Switch effortlessly between active groups via the header dropdown selector. Switching groups updates member chips, merges overlapping schedules, and calculates shared free slots in real time.
+- **✏️ Group Management & Access Control**:
+  - **Rename Group**: Any group member can rename the group.
+  - **Leave Group & Auto-Cleanup**: Members can leave a group at any time. When the last member departs, the group is automatically purged from Redis to prevent orphaned records.
+  - **Permission Enforcement**: All group mutations require valid session token authentication, and non-members are prohibited from modifying or renaming groups (`HTTP 403 Forbidden`).
+- **🔗 Invite Codes & Deep Links**: Groups have persistent codes (e.g. `G7K2P9`) and shareable links (e.g. `/?group=G7K2P9`). Opening a group link immediately adds the group to your active profile.
+- **⭐ Favorites-Only Sharing**: Only active teachings (⭐ I miei corsi) of group members are shared, keeping group timetables focused.
+- **👤 Include Yourself ("👤 Includi me")**: Overlay your own schedule alongside your peers' timetables with a distinct "Io 👤" badge and teal highlights.
+- **🏷️ Merged Identical Lectures**: Overlapping courses attended by multiple students in the same room are consolidated into a single card with all attendee badges (e.g. `[Io 👤] [Mario] [Luca]`).
+- **📊 Daily Timeline Grid (08:30 – 18:30)**: Visual vertical time grid with parallel lanes for simultaneous lectures and current-time indicators.
+- **🟢 Free Slots Calculator**: Computes common windows (≥ 30 min) where **all** members are free between 08:30 and 18:30 for study sessions or lunch breaks.
 
 ### 7. 📱 iOS & Mobile Optimizations
 - **Safe Area Inset Support**: Fully accounts for iPhone notch, Dynamic Island, and home indicator bars (`env(safe-area-inset-top)` and `env(safe-area-inset-bottom)`).
 - **Compact Header Breakpoints**: Responsive adjustments for narrower screens (e.g. iPhone SE / mini) to keep all navigation buttons accessible.
-- **PWA Offline Caching**: Service Worker v12 caches core application assets for fast load times and offline readiness.
+- **PWA Offline Caching**: Service Worker v15 caches core application assets for fast load times and offline readiness.
 
 ---
 
@@ -71,22 +78,26 @@ A modern, mobile-first Progressive Web App (PWA) designed for students at the **
 
 ```mermaid
 flowchart TD
-    subgraph PrivateAccount ["Private Account (User Only)"]
-        A["Soprannome + PIN"] -->|Salted SHA-256| B["Redis: account:clean_nick"]
-        B --> C["Personal Config & Exam Courses"]
+    subgraph PrivateAccount ["Private Account (OWASP Compliant)"]
+        A["Soprannome + PIN"] -->|PBKDF2-HMAC-SHA256 (100k iters)| B["Redis: account:clean_nick"]
+        B --> C["256-bit Sliding Session Token (st_...)"]
+        B --> D["One-Time Recovery Key (REC-XXXX-XXXX)"]
+        B --> E["Rate Limiter (5 attempts / 10 min)"]
+        C --> F["Bearer Token Background Sync"]
     end
 
     subgraph PublicShare ["Public Friend Sharing (Read-Only)"]
-        B -->|Generates| D["6-Char Share Code (e.g. K9X2P4)"]
-        D --> E["Redis: share:share_code"]
-        E --> F["Nickname + Courses (NO PIN, NO Credentials)"]
+        B -->|Generates| G["6-Char Share Code (e.g. K9X2P4)"]
+        G --> H["Redis: share:share_code"]
+        H --> I["Nickname + Courses (NO PIN, NO Credentials)"]
     end
 
-    subgraph FriendAccess ["Friends Access"]
-        F --> G["Direct Link: /?friend=K9X2P4"]
-        F --> H["Enter Code in App: K9X2P4"]
-        G --> I["Shared Weekly Grid (Multi-Student)"]
-        H --> I
+    subgraph MultiGroups ["Multi-Group Data Model"]
+        C -->|Authenticated Mutations| J["Redis: user_groups:share_code"]
+        J --> K["Group 1: group:G9X2P4"]
+        J --> L["Group 2: group:G3M1P8"]
+        K --> M["Members: [Alice, Bob, Marco]"]
+        M --> N["Merged Timetable & Free Slots"]
     end
 ```
 
