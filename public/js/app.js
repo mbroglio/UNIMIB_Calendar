@@ -180,6 +180,7 @@ function initApp() {
   } else {
     const guestChosen = localStorage.getItem('unimib_guest_chosen');
     if (!profileState.id && !guestChosen) {
+      showWelcome();
       openOnboardingModal();
     } else {
       showWelcome();
@@ -607,14 +608,16 @@ function setupEventListeners() {
   let touchEndX = 0;
   const mainEl = document.querySelector('main');
 
-  mainEl.addEventListener('touchstart', (e) => {
-    touchStartX = e.changedTouches[0].screenX;
-  }, { passive: true });
+  if (mainEl) {
+    mainEl.addEventListener('touchstart', (e) => {
+      touchStartX = e.changedTouches[0].screenX;
+    }, { passive: true });
 
-  mainEl.addEventListener('touchend', (e) => {
-    touchEndX = e.changedTouches[0].screenX;
-    handleSwipe();
-  }, { passive: true });
+    mainEl.addEventListener('touchend', (e) => {
+      touchEndX = e.changedTouches[0].screenX;
+      handleSwipe();
+    }, { passive: true });
+  }
 
   function handleSwipe() {
     if (state.activeTab !== 'timetable') return;
@@ -3776,6 +3779,21 @@ async function _syncConfigToProfile() {
   }
 }
 
+
+function loadFriends() {
+  try {
+    const raw = localStorage.getItem(FRIENDS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveFriends(friends) {
+  try {
+    localStorage.setItem(FRIENDS_KEY, JSON.stringify(friends));
+  } catch (e) { /* ignore */ }
+}
 
 /**
  * Cloud Multi-Group Sync
