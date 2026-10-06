@@ -766,6 +766,26 @@ class TestProfileEdgeCases(unittest.TestCase):
         self.assertIn("Troppi tentativi", h_limit.get_json()["error"])
 
 
+    def test_shared_calendar_helpers(self):
+        from api.shared_calendar import _get_monday, _extract_events_from_cells, _safe_ts
+        self.assertEqual(_get_monday("06-10-2026"), "05-10-2026")
+        self.assertEqual(_safe_ts({"timestamp": "123"}), 123)
+        self.assertEqual(_safe_ts({}), 0)
+
+        cells = [
+            {"data": "05-10-2026", "nome_giorno": "lunedì", "ora_inizio": "09:00", "ora_fine": "11:00",
+             "nome_insegnamento": "Analisi I", "codice_insegnamento": "MAT01", "aula": "U1-01", "docente": "Rossi", "Annullato": "0"},
+            {"data": "05-10-2026", "nome_giorno": "lunedì", "ora_inizio": "11:00", "ora_fine": "13:00",
+             "nome_insegnamento": "Fisica I", "codice_insegnamento": "FIS01", "aula": "U1-02", "docente": "Bianchi", "Annullato": "0"}
+        ]
+        evs = _extract_events_from_cells(cells, ["MAT01"])
+        self.assertEqual(len(evs), 1)
+        self.assertEqual(evs[0]["course_code"], "MAT01")
+
+        evs_all = _extract_events_from_cells(cells, None)
+        self.assertEqual(len(evs_all), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
 

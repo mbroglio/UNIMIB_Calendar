@@ -4647,9 +4647,14 @@ async function loadFriendsCalendar() {
   friendsState.myEvents  = [];
   renderFriendsView(); // shows spinner
 
-  // If logged in, perform cloud sync first so any members added by friends in the cloud are loaded
+  // If local friends list is empty, wait for cloud sync to pull members; otherwise sync in background
+  const hasLocalFriends = friendsState.friends && friendsState.friends.length > 0;
   if (profileState.shareCode) {
-    await syncGroupCloud();
+    if (!hasLocalFriends) {
+      await syncGroupCloud();
+    } else {
+      syncGroupCloud().catch(e => console.warn('Background syncGroupCloud error:', e));
+    }
   }
 
   const hasFriends = friendsState.friends.length > 0;
@@ -4665,48 +4670,66 @@ async function loadFriendsCalendar() {
     ? friendsState.currentMonday.split('-').join('-')
     : formatFormattedDate(getMonday(new Date()));
 
-  // ── 1. Fetch friends' events from shared_calendar API ─────────────────────
-  if (friendsState.friends.length > 0) {
-    try {
-      const ids  = friendsState.friends.map(f => f.share_code || f.id).join(',');
-      const resp = await fetchJson(`/api/shared_calendar?ids=${encodeURIComponent(ids)}&date=${encodeURIComponent(date)}`);
-      friendsState.events  = resp.events || [];
-      (resp.profiles || []).forEach(p => {
-        const pId = (p.share_code || p.id || '').toUpperCase();
-        const local = friendsState.friends.find(f => (f.id || '').toUpperCase() === pId || (f.share_code || '').toUpperCase() === pId);
-        if (local && p.color) local.color = p.color;
-      });
-      saveFriends(friendsState.friends);
-    } catch (e) {
-      console.warn('Friends calendar load error:', e);
-      friendsState.events = [];
-    }
+  // ── Parallel Fetch: Shared Friends Calendar + Own Calendar ──────────────────
+  const fetchPromises = [];
+
+  if (hasFriends) {
+    const ids = friendsState.friends.map(f => f.share_code || f.id).join(',');
+    fetchPromises.push(
+      fetchJson(`/api/shared_calendar?ids=${encodeURIComponent(ids)}&date=${encodeURIComponent(date)}`)
+        .catch(e => {
+          console.warn('Friends calendar load error:', e);
+          return { events: [], profiles: [] };
+        })
+    );
+  } else {
+    fetchPromises.push(Promise.resolve(null));
+  }
+
+  if (hasMyself) {
+    const cfg = state.config;
+    const calUrl = `/api/calendar?anno=${encodeURIComponent(cfg.anno)}&corso=${encodeURIComponent(cfg.corso)}&date=${encodeURIComponent(date)}` +
+                   cfg.anni.map(a => `&anno2=${encodeURIComponent(a)}`).join('');
+    fetchPromises.push(
+      fetchJson(calUrl)
+        .catch(e => {
+          console.warn('Own calendar load error for friends view:', e);
+          return null;
+        })
+    );
+  } else {
+    fetchPromises.push(Promise.resolve(null));
+  }
+
+  const [resp, calData] = await Promise.all(fetchPromises);
+
+  if (resp) {
+    friendsState.events = resp.events || [];
+    (resp.profiles || []).forEach(p => {
+      const pId = (p.share_code || p.id || '').toUpperCase();
+      const local = friendsState.friends.find(f => (f.id || '').toUpperCase() === pId || (f.share_code || '').toUpperCase() === pId);
+      if (local && p.color) local.color = p.color;
+    });
+    saveFriends(friendsState.friends);
   } else {
     friendsState.events = [];
   }
 
-  // ── 2. Fetch own events from calendar API (if logged in + config set) ──────
-  if (friendsState.showMyself && profileState.shareCode && state.config) {
-    try {
-      const cfg = state.config;
-      const calUrl = `/api/calendar?anno=${encodeURIComponent(cfg.anno)}&corso=${encodeURIComponent(cfg.corso)}&date=${encodeURIComponent(date)}` +
-                     cfg.anni.map(a => `&anno2=${encodeURIComponent(a)}`).join('');
-      const calData = await fetchJson(calUrl);
-      let myEvs = calData.events || [];
-      const favCodes = new Set((cfg.favorites || []).map(f => (f.code || '').toUpperCase()).filter(Boolean));
-      if (favCodes.size > 0) {
-        myEvs = myEvs.filter(e => favCodes.has((e.course_code || '').toUpperCase()));
-      }
-      myEvs.forEach(ev => {
-        ev.profile_id = 'MY_SELF';
-        ev.nickname   = profileState.nickname || 'Io';
-        ev.color      = '#2DD4BF';
-      });
-      friendsState.myEvents = myEvs;
-    } catch (e) {
-      console.warn('Own calendar load error for friends view:', e);
-      friendsState.myEvents = [];
+  if (calData && state.config) {
+    const cfg = state.config;
+    let myEvs = calData.events || [];
+    const favCodes = new Set((cfg.favorites || []).map(f => (f.code || '').toUpperCase()).filter(Boolean));
+    if (favCodes.size > 0) {
+      myEvs = myEvs.filter(e => favCodes.has((e.course_code || '').toUpperCase()));
     }
+    myEvs.forEach(ev => {
+      ev.profile_id = 'MY_SELF';
+      ev.nickname   = profileState.nickname || 'Io';
+      ev.color      = '#2DD4BF';
+    });
+    friendsState.myEvents = myEvs;
+  } else {
+    friendsState.myEvents = [];
   }
 
   friendsState.isLoading = false;

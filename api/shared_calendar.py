@@ -12,35 +12,22 @@ Returns ONLY the courses each student has marked as favourites
 (config.favorites). If a student has no favourites, all their
 courses are returned (full study-year timetable).
 
-Returns:
-{
-  "profiles": [
-    { "id": "...", "nickname": "...", "color": "#..." }
-  ],
-  "events": [
-    {
-      "profile_id":   "...",
-      "nickname":     "...",
-      "color":        "#...",
-      "date":         "DD-MM-YYYY",
-      "day_name":     "Lunedì",
-      "start_time":   "09:00",
-      "end_time":     "11:00",
-      "course":       "...",
-      "course_code":  "...",
-      "aula":         "...",
-      "docente":      "..."
-    }
-  ]
-}
+High-Performance Parallel Engine:
+- Profile lookups run in parallel via ThreadPoolExecutor.
+- UNIMIB grid fetches are deduplicated (multiple students in the same
+  degree/year share a single request).
+- Distinct UNIMIB grid requests run concurrently in parallel.
+- Responses are cached in an in-memory TTL cache (300s) for instant response.
 """
 
 import os
 import json
+import time
 import urllib.request
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
 from datetime import datetime, timedelta
+import concurrent.futures
 
 def _get_redis_creds():
     url = (
@@ -67,6 +54,10 @@ SHARED_COLORS = [
 ]
 
 MAX_PROFILES = 8  # safety cap
+CACHE_TTL = 300   # 5 minutes in-memory cache for UNIMIB grids
+
+# In-memory grid cache: (anno, corso, tuple(sorted(anni)), monday) -> (timestamp, list_of_raw_cells)
+_grid_cache = {}
 
 
 # ── Redis helper ────────────────────────────────────────────────────────────────
@@ -88,7 +79,24 @@ def _redis_get(key: str):
     return json.loads(raw) if raw else None
 
 
-# ── UNIMIB grid fetch (same logic as calendar.py) ─────────────────────────────
+def _resolve_profile(code: str):
+    """Try resolving profile by public share code, account or legacy profile."""
+    try:
+        prof = _redis_get(f"share:{code}")
+        if prof and isinstance(prof, dict):
+            return code, prof
+        prof = _redis_get(f"account:{code}")
+        if prof and isinstance(prof, dict):
+            return code, prof
+        prof = _redis_get(f"profile:{code}")
+        if prof and isinstance(prof, dict):
+            return code, prof
+    except Exception:
+        pass
+    return code, None
+
+
+# ── UNIMIB grid fetch with caching & deduplication ────────────────────────────
 
 def _get_monday(date_str: str) -> str:
     """Given DD-MM-YYYY or YYYY-MM-DD, return the Monday of that week in DD-MM-YYYY."""
@@ -107,21 +115,24 @@ def _get_monday(date_str: str) -> str:
     return monday.strftime("%d-%m-%Y")
 
 
-def _fetch_events(cfg: dict, date_str: str, favorite_codes: list | None = None) -> list:
-    """
-    Fetch the weekly timetable events for a given config + week.
-    Mirrors the logic in api/calendar.py exactly.
+def _safe_ts(c):
+    try:
+        return int(c.get("timestamp") or 0)
+    except (ValueError, TypeError):
+        return 0
 
-    If favorite_codes is provided and non-empty, only events whose
-    course_code appears in that list are returned (i.e. the student's
-    selected subjects).  When favorite_codes is empty or None every
-    event in the study-year timetable is returned.
-    """
-    anno   = cfg.get("anno", "")
-    corso  = cfg.get("corso", "")
-    anni   = cfg.get("anni", [])
-    if not anno or not corso or not anni:
+
+def _fetch_raw_grid(anno: str, corso: str, anni_tuple: tuple, monday_str: str) -> list:
+    """Fetch raw UNIMIB cells with memory caching."""
+    if not anno or not corso or not anni_tuple:
         return []
+
+    cache_key = (anno, corso, anni_tuple, monday_str)
+    cached = _grid_cache.get(cache_key)
+    if cached:
+        cached_time, cached_cells = cached
+        if time.time() - cached_time < CACHE_TTL:
+            return cached_cells
 
     params = [
         ("view",      "easycourse"),
@@ -129,36 +140,30 @@ def _fetch_events(cfg: dict, date_str: str, favorite_codes: list | None = None) 
         ("include",   "corso"),
         ("anno",      anno),
         ("corso",     corso),
-        *[("anno2[]", a) for a in anni],
-        ("date",      date_str),
+        *[("anno2[]", a) for a in anni_tuple],
+        ("date",      monday_str),
         ("_lang",     "it"),
     ]
     url = f"{GRID_URL}?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             raw_data = json.loads(resp.read().decode("utf-8"))
+        if isinstance(raw_data, dict):
+            cells = sorted(raw_data.get("celle", []), key=_safe_ts)
+            _grid_cache[cache_key] = (time.time(), cells)
+            return cells
     except Exception:
-        return []
+        pass
+    return []
 
-    if not isinstance(raw_data, dict):
-        return []
 
-    def _safe_ts(c):
-        try:
-            return int(c.get("timestamp") or 0)
-        except (ValueError, TypeError):
-            return 0
-
-    # Normalise favourite codes to upper-case set for fast lookup
-    fav_set = {code.upper() for code in favorite_codes} if favorite_codes else None
-
-    celle  = sorted(raw_data.get("celle", []), key=_safe_ts)
+def _extract_events_from_cells(cells: list, favorite_codes: list | None) -> list:
+    """Filter pre-fetched cells according to student favorites."""
+    fav_set = {c.upper() for c in favorite_codes} if favorite_codes else None
     events = []
-    for c in celle:
+    for c in cells:
         course_code = c.get("codice_insegnamento", "")
-        # Filter: if the student has selected favourite courses, only
-        # include events that belong to those courses.
         if fav_set and course_code.upper() not in fav_set:
             continue
         events.append({
@@ -207,26 +212,27 @@ class handler(BaseHTTPRequestHandler):
         if not codes:
             return self._send_json(400, {"error": "codes parameter required"})
 
-        # Normalise date to the Monday of the requested week
-        if not date:
-            date = datetime.now().strftime("%d-%m-%Y")
         monday = _get_monday(date)
 
-        profiles_out = []
-        all_events   = []
+        # ── 1. Parallel Profile Resolution via ThreadPoolExecutor ────────────
+        resolved_profiles = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(codes), 8)) as executor:
+            future_to_code = {executor.submit(_resolve_profile, c): c for c in codes}
+            for future in concurrent.futures.as_completed(future_to_code):
+                try:
+                    c, prof = future.result()
+                    if prof:
+                        resolved_profiles[c] = prof
+                except Exception:
+                    pass
+
+        # ── 2. Collect Distinct UNIMIB Grids to Fetch ─────────────────────────
+        # Distinct course specifications across all students: set of (anno, corso, anni_tuple)
+        needed_grids = set()
+        students_plan = []
 
         for idx, code in enumerate(codes):
-            try:
-                # 1) Try public share entry
-                profile = _redis_get(f"share:{code}")
-                # 2) Try account entry
-                if not profile:
-                    profile = _redis_get(f"account:{code}")
-                # 3) Legacy profile entry
-                if not profile:
-                    profile = _redis_get(f"profile:{code}")
-            except Exception:
-                continue
+            profile = resolved_profiles.get(code)
             if not profile:
                 continue
 
@@ -235,22 +241,64 @@ class handler(BaseHTTPRequestHandler):
             nickname = profile.get("nickname", share_id)
             cfg      = profile.get("config") or {}
 
-            # Extract the student's selected favourite course codes.
-            # If they have selected specific subjects, we show only those;
-            # otherwise we fall back to showing the full study-year timetable.
+            anno   = cfg.get("anno", "")
+            corso  = cfg.get("corso", "")
+            anni   = tuple(sorted(cfg.get("anni", [])))
+
             favorites      = cfg.get("favorites") or []
             favorite_codes = [f.get("code", "") for f in favorites if f.get("code")] if favorites else None
 
-            profiles_out.append({"id": share_id, "share_code": share_id, "nickname": nickname, "color": color})
+            if anno and corso and anni:
+                grid_key = (anno, corso, anni)
+                needed_grids.add(grid_key)
+            else:
+                grid_key = None
 
-            events = _fetch_events(cfg, monday, favorite_codes if favorite_codes else None)
-            for ev in events:
-                ev["profile_id"] = share_id
-                ev["nickname"]   = nickname
-                ev["color"]      = color
-            all_events.extend(events)
+            students_plan.append({
+                "share_id":       share_id,
+                "nickname":       nickname,
+                "color":          color,
+                "grid_key":       grid_key,
+                "favorite_codes": favorite_codes
+            })
 
-        # Sort: date (DD-MM-YYYY → YYYY-MM-DD for lexicographic sort) then time
+        # ── 3. Parallel Fetch of Distinct UNIMIB Grids ────────────────────────
+        grids_data = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(max(len(needed_grids), 1), 8)) as executor:
+            future_to_grid = {
+                executor.submit(_fetch_raw_grid, g[0], g[1], g[2], monday): g
+                for g in needed_grids
+            }
+            for future in concurrent.futures.as_completed(future_to_grid):
+                grid_key = future_to_grid[future]
+                try:
+                    grids_data[grid_key] = future.result()
+                except Exception:
+                    grids_data[grid_key] = []
+
+        # ── 4. Extract and Filter Events for Each Student ────────────────────
+        profiles_out = []
+        all_events   = []
+
+        for sp in students_plan:
+            profiles_out.append({
+                "id":         sp["share_id"],
+                "share_code": sp["share_id"],
+                "nickname":   sp["nickname"],
+                "color":      sp["color"]
+            })
+
+            grid_key = sp["grid_key"]
+            if grid_key and grid_key in grids_data:
+                cells = grids_data[grid_key]
+                student_events = _extract_events_from_cells(cells, sp["favorite_codes"])
+                for ev in student_events:
+                    ev["profile_id"] = sp["share_id"]
+                    ev["nickname"]   = sp["nickname"]
+                    ev["color"]      = sp["color"]
+                all_events.extend(student_events)
+
+        # Sort: date (YYYY-MM-DD for lexicographic sort) then start_time then nickname
         def _sort_key(e):
             d = e.get("date", "")
             parts = d.split("-")
