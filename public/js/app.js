@@ -433,7 +433,10 @@ function setupEventListeners() {
     btnChangesNotice.addEventListener('click', () => {
       const stored = getStoredChanges(state.currentMonday);
       if (stored && stored.changes) {
-        openScheduleChangesModal(stored.changes, state.currentMonday, stored.weekLabel);
+        const relevantChanges = getFilteredChanges(stored.changes, state.activeFilter);
+        if (relevantChanges.length > 0) {
+          openScheduleChangesModal(relevantChanges, state.currentMonday, stored.weekLabel);
+        }
       }
     });
   }
@@ -459,7 +462,10 @@ function setupEventListeners() {
     btnBannerViewChanges.addEventListener('click', () => {
       const stored = getStoredChanges(state.currentMonday);
       if (stored && stored.changes) {
-        openScheduleChangesModal(stored.changes, state.currentMonday, stored.weekLabel);
+        const relevantChanges = getFilteredChanges(stored.changes, state.activeFilter);
+        if (relevantChanges.length > 0) {
+          openScheduleChangesModal(relevantChanges, state.currentMonday, stored.weekLabel);
+        }
       }
     });
   }
@@ -467,27 +473,9 @@ function setupEventListeners() {
   const btnBannerDismiss = document.getElementById('btnBannerDismissChanges');
   if (btnBannerDismiss) {
     btnBannerDismiss.addEventListener('click', () => {
-      sessionDismissedBanners.add(state.currentMonday);
+      sessionDismissedBanners.add(`${state.currentMonday}_${state.activeFilter}`);
       const banner = document.getElementById('timetableChangesBanner');
       if (banner) banner.style.display = 'none';
-    });
-  }
-
-  // Filter inside Schedule Changes Modal
-  const btnModalFilterFav = document.getElementById('btnModalChangesFilterFav');
-  const btnModalFilterAll = document.getElementById('btnModalChangesFilterAll');
-  if (btnModalFilterFav && btnModalFilterAll) {
-    btnModalFilterFav.addEventListener('click', () => {
-      modalChangesFilter = 'fav';
-      btnModalFilterFav.classList.add('active');
-      btnModalFilterAll.classList.remove('active');
-      renderScheduleChangesModalList();
-    });
-    btnModalFilterAll.addEventListener('click', () => {
-      modalChangesFilter = 'all';
-      btnModalFilterAll.classList.add('active');
-      btnModalFilterFav.classList.remove('active');
-      renderScheduleChangesModalList();
     });
   }
 
@@ -1608,6 +1596,8 @@ function setFilter(filterType) {
   document.getElementById('btnFilterTarget').classList.toggle('active', filterType === 'target');
   document.getElementById('btnFilterAll').classList.toggle('active', filterType === 'all');
   renderEvents();
+  updateChangesUI(state.currentMonday);
+  checkAndShowChangesModalForCurrentFilter(state.currentMonday);
 }
 
 function changeWeek(dayOffset) {
@@ -1828,13 +1818,40 @@ function getStoredChanges(mondayDateStr) {
   }
 }
 
+function getFilteredChanges(changes, filterType) {
+  if (!changes || !changes.length) return [];
+  const hasFavorites = Boolean(state.config && state.config.favorites && state.config.favorites.length > 0);
+  if (filterType === 'target' && hasFavorites) {
+    return changes.filter(c => c.isFavorite);
+  }
+  return changes;
+}
+
+function checkAndShowChangesModalForCurrentFilter(mondayDateStr) {
+  mondayDateStr = mondayDateStr || state.currentMonday;
+  if (!mondayDateStr || !state.config || state.activeTab !== 'timetable') return;
+
+  const stored = getStoredChanges(mondayDateStr);
+  if (!stored || !stored.changes || stored.changes.length === 0) return;
+
+  const relevantChanges = getFilteredChanges(stored.changes, state.activeFilter);
+  if (relevantChanges.length === 0) return;
+
+  const relevantHash = generateChangesHash(relevantChanges);
+  const seenKey = `${CALENDAR_CACHE_PREFIX}seen_${configKey()}_${mondayDateStr}_${state.activeFilter}`;
+  const seenHash = localStorage.getItem(seenKey);
+
+  if (seenHash !== relevantHash) {
+    openScheduleChangesModal(relevantChanges, mondayDateStr, stored.weekLabel);
+  }
+}
+
 function handleCalendarUpdates(previousCacheData, data, mondayDateStr) {
   const changes = detectCalendarChanges(previousCacheData.events || [], data.events || [], mondayDateStr);
   if (!changes || changes.length === 0) return;
 
   const hash = generateChangesHash(changes);
   const storageKey = `${CALENDAR_CACHE_PREFIX}changes_${configKey()}_${mondayDateStr}`;
-  const seenKey = `${CALENDAR_CACHE_PREFIX}seen_${configKey()}_${mondayDateStr}`;
 
   const storedPayload = {
     detectedAt: Date.now(),
@@ -1849,19 +1866,7 @@ function handleCalendarUpdates(previousCacheData, data, mondayDateStr) {
     console.warn('Storage save error for changes:', e);
   }
 
-  const seenHash = localStorage.getItem(seenKey);
-  const isUnseen = seenHash !== hash;
-
-  if (isUnseen) {
-    const hasFavorites = Boolean(state.config && state.config.favorites && state.config.favorites.length > 0);
-    const favoriteChanges = changes.filter(c => c.isFavorite);
-
-    if (!hasFavorites || favoriteChanges.length > 0 || state.activeFilter === 'all') {
-      openScheduleChangesModal(changes, mondayDateStr, data.week_label);
-    } else {
-      showToast('ℹ️ Variazioni orario rilevate in altri corsi del tuo anno', 4000);
-    }
-  }
+  checkAndShowChangesModalForCurrentFilter(mondayDateStr);
 }
 
 function getEventChange(e, mondayDateStr) {
@@ -1884,12 +1889,23 @@ function acknowledgeScheduleChanges(mondayDateStr) {
   mondayDateStr = mondayDateStr || state.currentMonday;
   if (mondayDateStr && state.config) {
     const stored = getStoredChanges(mondayDateStr);
-    if (stored && stored.hash) {
-      const seenKey = `${CALENDAR_CACHE_PREFIX}seen_${configKey()}_${mondayDateStr}`;
+    if (stored && stored.changes) {
+      const relevantChanges = getFilteredChanges(stored.changes, state.activeFilter);
+      const relevantHash = generateChangesHash(relevantChanges);
+      const seenKey = `${CALENDAR_CACHE_PREFIX}seen_${configKey()}_${mondayDateStr}_${state.activeFilter}`;
       try {
-        localStorage.setItem(seenKey, stored.hash);
+        localStorage.setItem(seenKey, relevantHash);
       } catch (e) {
         console.warn('Error saving seen changes hash:', e);
+      }
+
+      if (state.activeFilter === 'all') {
+        const favChanges = getFilteredChanges(stored.changes, 'target');
+        const favHash = generateChangesHash(favChanges);
+        const seenKeyTarget = `${CALENDAR_CACHE_PREFIX}seen_${configKey()}_${mondayDateStr}_target`;
+        try {
+          localStorage.setItem(seenKeyTarget, favHash);
+        } catch (e) {}
       }
     }
   }
@@ -1918,9 +1934,16 @@ function updateChangesUI(mondayDateStr) {
     return;
   }
 
-  const changes = stored.changes;
-  const seenKey = `${CALENDAR_CACHE_PREFIX}seen_${configKey()}_${mondayDateStr}`;
-  const isUnseen = localStorage.getItem(seenKey) !== stored.hash;
+  const relevantChanges = getFilteredChanges(stored.changes, state.activeFilter);
+  if (relevantChanges.length === 0) {
+    if (btnNotice) btnNotice.style.display = 'none';
+    if (banner) banner.style.display = 'none';
+    return;
+  }
+
+  const relevantHash = generateChangesHash(relevantChanges);
+  const seenKey = `${CALENDAR_CACHE_PREFIX}seen_${configKey()}_${mondayDateStr}_${state.activeFilter}`;
+  const isUnseen = localStorage.getItem(seenKey) !== relevantHash;
 
   if (btnNotice) {
     btnNotice.style.display = 'inline-flex';
@@ -1930,20 +1953,21 @@ function updateChangesUI(mondayDateStr) {
   }
 
   if (banner) {
-    if (sessionDismissedBanners.has(mondayDateStr)) {
+    if (sessionDismissedBanners.has(`${mondayDateStr}_${state.activeFilter}`)) {
       banner.style.display = 'none';
     } else {
       banner.style.display = 'flex';
-      const roomCount = changes.filter(c => c.type === 'ROOM_CHANGED' || c.type === 'ROOM_AND_TIME_CHANGED').length;
-      const cancelCount = changes.filter(c => c.type === 'CANCELED' || c.type === 'REMOVED').length;
-      const otherCount = changes.length - roomCount - cancelCount;
+      const roomCount = relevantChanges.filter(c => c.type === 'ROOM_CHANGED' || c.type === 'ROOM_AND_TIME_CHANGED').length;
+      const cancelCount = relevantChanges.filter(c => c.type === 'CANCELED' || c.type === 'REMOVED').length;
+      const otherCount = relevantChanges.length - roomCount - cancelCount;
 
       const parts = [];
       if (roomCount > 0) parts.push(`${roomCount} ${roomCount === 1 ? 'aula cambiata' : 'aule cambiate'}`);
       if (cancelCount > 0) parts.push(`${cancelCount} ${cancelCount === 1 ? 'lezione annullata' : 'lezioni annullate'}`);
       if (otherCount > 0) parts.push(`${otherCount} ${otherCount === 1 ? 'altra modifica' : 'altre modifiche'}`);
 
-      if (bannerTitle) bannerTitle.textContent = `⚠️ Variazioni nel calendario (${changes.length})`;
+      const scopeText = state.activeFilter === 'target' ? 'nei tuoi corsi' : 'in tutti i corsi';
+      if (bannerTitle) bannerTitle.textContent = `⚠️ Variazioni ${scopeText} (${relevantChanges.length})`;
       if (bannerSubtitle) bannerSubtitle.textContent = parts.join(', ') || 'Rilevate modifiche per questa settimana';
     }
   }
@@ -1958,33 +1982,14 @@ function openScheduleChangesModal(changes, mondayDateStr, weekLabel) {
 
   const subtitle = document.getElementById('scheduleChangesModalSubtitle');
   if (subtitle) {
+    const scopeLabel = state.activeFilter === 'target' ? 'nei tuoi corsi seguiti' : 'in tutti i corsi';
     subtitle.textContent = weekLabel
-      ? `Aggiornamenti rilevati per la settimana ${weekLabel}`
-      : `Aggiornamenti rilevati per la settimana del ${mondayDateStr}`;
+      ? `Aggiornamenti rilevati ${scopeLabel} per la settimana ${weekLabel}`
+      : `Aggiornamenti rilevati ${scopeLabel} per la settimana del ${mondayDateStr}`;
   }
-
-  const hasFavorites = Boolean(state.config && state.config.favorites && state.config.favorites.length > 0);
-  const favCount = currentModalChanges.filter(c => c.isFavorite).length;
-  const allCount = currentModalChanges.length;
 
   const filterBar = document.getElementById('scheduleChangesFilterBar');
-  const btnFilterFav = document.getElementById('btnModalChangesFilterFav');
-  const btnFilterAll = document.getElementById('btnModalChangesFilterAll');
-
-  if (hasFavorites && favCount > 0 && favCount < allCount) {
-    if (filterBar) filterBar.style.display = 'block';
-    if (btnFilterFav) {
-      btnFilterFav.textContent = `⭐ I tuoi corsi (${favCount})`;
-      btnFilterFav.classList.toggle('active', modalChangesFilter === 'fav');
-    }
-    if (btnFilterAll) {
-      btnFilterAll.textContent = `📚 Tutte le variazioni (${allCount})`;
-      btnFilterAll.classList.toggle('active', modalChangesFilter === 'all');
-    }
-  } else {
-    if (filterBar) filterBar.style.display = 'none';
-    modalChangesFilter = 'all';
-  }
+  if (filterBar) filterBar.style.display = 'none';
 
   renderScheduleChangesModalList();
   modal.classList.add('active');
@@ -1995,19 +2000,12 @@ function renderScheduleChangesModalList() {
   if (!container) return;
   container.innerHTML = '';
 
-  const hasFavorites = Boolean(state.config && state.config.favorites && state.config.favorites.length > 0);
-  let list = currentModalChanges;
-  if (hasFavorites && modalChangesFilter === 'fav') {
-    list = currentModalChanges.filter(c => c.isFavorite);
-    if (list.length === 0) {
-      list = currentModalChanges;
-    }
-  }
+  const list = currentModalChanges;
 
   if (list.length === 0) {
     container.innerHTML = `
       <div style="text-align:center; padding:20px; color:var(--text-secondary);">
-        Nessuna variazione da mostrare.
+        Nessuna variazione da mostrare per i filtri selezionati.
       </div>`;
     return;
   }
