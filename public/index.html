@@ -31,6 +31,7 @@
         </div>
       </div>
       <div class="header-actions">
+        <button id="btnChangesNotice" class="btn-icon changes-btn" title="Variazioni orario" style="display:none; position:relative;">🔔<span id="changesBadgeCount" class="changes-badge-dot"></span></button>
         <button id="btnExportCalendar" class="btn-icon" title="Esporta calendario (.ics / .csv)">📥</button>
         <button id="btnProfile" class="btn-icon" title="Il tuo profilo">👤</button>
         <button id="btnSettings" class="btn-icon" title="Scegli corso di studio">⚙️</button>
@@ -65,6 +66,21 @@
       <div style="position: relative;">
         <input type="text" id="searchInput" placeholder="🔍 Cerca per corso, docente o aula..." 
                style="width: 100%; padding: 10px 14px; border-radius: 10px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #FFF; font-size: 0.85rem; outline: none;">
+      </div>
+    </div>
+
+    <!-- Timetable Changes Banner -->
+    <div id="timetableChangesBanner" class="timetable-changes-banner" style="display: none;">
+      <div class="changes-banner-content">
+        <span class="changes-banner-icon">⚠️</span>
+        <div class="changes-banner-text">
+          <strong id="changesBannerTitle">Variazioni nel calendario</strong>
+          <span id="changesBannerSubtitle">Rilevate modifiche per questa settimana</span>
+        </div>
+      </div>
+      <div class="changes-banner-actions">
+        <button id="btnBannerViewChanges" class="btn-changes-view" type="button">Vedi dettagli</button>
+        <button id="btnBannerDismissChanges" class="btn-changes-dismiss" type="button" title="Nascondi avviso">✕</button>
       </div>
     </div>
 
@@ -958,6 +974,40 @@
         <p id="friendCodeError" style="color:#EF4444; font-size:0.8rem; display:none; margin-bottom:8px;"></p>
         <button id="btnLookupFriendCode" class="btn-secondary" style="width:100%; margin-bottom:8px;">🔍 Verifica codice</button>
         <button id="btnConfirmAddFriendCode" class="btn-primary" style="width:100%;" disabled>+ Aggiungi al gruppo</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Schedule Changes Modal (Shown when timetable changes are detected) -->
+  <div id="scheduleChangesModal" class="modal-overlay">
+    <div class="modal-content setup-content" style="max-width: 480px; text-align: left;">
+      <div class="modal-header">
+        <div>
+          <h3 style="font-size: 1.15rem; color: #FFF; margin: 0 0 2px; display: flex; align-items: center; gap: 8px;">
+            <span>⚠️</span> Variazioni nel calendario
+          </h3>
+          <p id="scheduleChangesModalSubtitle" style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">
+            Aggiornamenti rilevati rispetto all'ultimo accesso
+          </p>
+        </div>
+        <button id="btnCloseScheduleChangesModal" class="btn-icon" style="width: 30px; height: 30px;" type="button">✕</button>
+      </div>
+
+      <div id="scheduleChangesFilterBar" style="display: none; margin-top: 12px;">
+        <div class="toggle-group" style="margin-bottom: 0;">
+          <button id="btnModalChangesFilterFav" class="toggle-btn active" style="font-size: 0.78rem; padding: 6px 10px;" type="button">⭐ Corsi seguiti</button>
+          <button id="btnModalChangesFilterAll" class="toggle-btn" style="font-size: 0.78rem; padding: 6px 10px;" type="button">📚 Tutte le variazioni</button>
+        </div>
+      </div>
+
+      <div id="scheduleChangesList" class="schedule-changes-list">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <div style="display: flex; gap: 8px; margin-top: 16px;">
+        <button id="btnAckScheduleChanges" class="btn-primary" style="flex: 1; padding: 12px; font-weight: 600;" type="button">
+          Ho capito
+        </button>
       </div>
     </div>
   </div>
