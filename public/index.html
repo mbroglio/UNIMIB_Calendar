@@ -57,9 +57,19 @@
   <section id="viewTimetable" class="app-view">
     <!-- Filter & Mode Selection -->
     <div class="filter-container">
-      <div class="toggle-group">
-        <button id="btnFilterTarget" class="toggle-btn active">⭐ I Miei Corsi</button>
-        <button id="btnFilterAll" class="toggle-btn">📚 Tutti i Corsi</button>
+      <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+        <div class="toggle-group" style="flex: 1; margin-bottom: 0;">
+          <button id="btnFilterTarget" class="toggle-btn active">⭐ I Miei Corsi</button>
+          <button id="btnFilterAll" class="toggle-btn">📚 Tutti i Corsi</button>
+        </div>
+        <button id="btnQuickAddExternal" class="btn-secondary" type="button" style="width: auto; padding: 10px 12px; font-size: 0.8rem; font-weight: 600; white-space: nowrap; display: flex; align-items: center; gap: 5px; border-radius: 12px;" title="Aggiungi materia da un altro corso di studio">
+          <span>🌐</span> + Corso Esterno
+        </button>
+      </div>
+
+      <!-- Active External Courses Chips Bar -->
+      <div id="externalCoursesChipsBar" class="exam-courses-bar" style="display: none; margin-bottom: 8px;">
+        <!-- Chips rendered dynamically -->
       </div>
 
       <!-- Live Search Bar -->
@@ -647,6 +657,65 @@
     </div>
   </div>
 
+  <!-- Add External Course Modal (Corso Esterno da altro CdL) -->
+  <div id="addExternalCourseModal" class="modal-overlay">
+    <div class="modal-content setup-content" style="max-width: 460px;">
+      <div class="modal-header">
+        <h3 style="font-size:1.15rem; display:flex; align-items:center; gap:6px;">
+          <span>🌐</span> Aggiungi corso esterno
+        </h3>
+        <button id="btnCloseAddExternalCourse" class="btn-icon" style="width:30px; height:30px;">✕</button>
+      </div>
+      <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:14px; line-height:1.45;">
+        Seleziona un insegnamento erogato da un altro corso di laurea dell'Ateneo per aggiungerlo al tuo calendario.
+      </p>
+
+      <div class="form-field">
+        <label for="extCourseYear">Anno accademico</label>
+        <select id="extCourseYear"></select>
+      </div>
+
+      <div class="form-field">
+        <label for="extCourseArea">Area didattica</label>
+        <select id="extCourseArea">
+          <option value="">Caricamento aree...</option>
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label for="extCourseSelect">Corso di studio esterno</label>
+        <select id="extCourseSelect" disabled>
+          <option value="">Seleziona prima l'area</option>
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label for="extCourseStudyYear">Anno di studio</label>
+        <select id="extCourseStudyYear" disabled>
+          <option value="">Seleziona prima il corso</option>
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label for="extCourseTeaching">Insegnamento / Materia</label>
+        <select id="extCourseTeaching" disabled>
+          <option value="">Seleziona prima l'anno di studio</option>
+        </select>
+      </div>
+
+      <div id="extCourseTeachingSearchBox" style="display:none; margin-bottom:10px;">
+        <input type="text" id="extCourseTeachingSearch" placeholder="🔍 Filtra materie per nome o docente..."
+               style="width: 100%; padding: 8px 12px; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: #FFF; font-size: 0.82rem; outline: none;">
+      </div>
+
+      <div id="extCourseStatusHint" style="display:none; font-size:0.8rem; color:var(--accent-cyan); margin-bottom:8px; text-align:center;">
+        Caricamento materie da UNIMIB...
+      </div>
+
+      <button id="btnConfirmAddExternalCourse" class="btn-primary" style="margin-top:10px;" disabled>➕ Aggiungi ai Miei Corsi</button>
+    </div>
+  </div>
+
   <!-- Course of Study Setup Modal -->
   <div id="setupModal" class="modal-overlay">
     <div class="modal-content setup-content">
@@ -683,6 +752,15 @@
         <label>⭐ I miei corsi seguiti <span class="field-hint">(seleziona le materie che frequenti)</span></label>
         <div id="cfgFavorites" class="choice-list">
           <p class="field-hint">Seleziona prima l'anno di studio.</p>
+        </div>
+      </div>
+      <div class="form-field">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <label style="margin:0;">🌐 Corsi da altri corsi di laurea <span class="field-hint">(corsi esterni)</span></label>
+          <button id="btnOpenAddExternalFromSetup" type="button" class="btn-secondary" style="width:auto; padding:4px 10px; font-size:0.75rem;">+ Aggiungi</button>
+        </div>
+        <div id="cfgExternalCoursesList" class="choice-list" style="margin-bottom:0; max-height:160px; overflow-y:auto;">
+          <p class="field-hint">Nessun corso esterno aggiunto.</p>
         </div>
       </div>
 

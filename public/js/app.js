@@ -18,7 +18,7 @@ const FRIENDS_COLORS = ['#8B5CF6','#10B981','#F59E0B','#EC4899','#3B82F6','#F973
 let state = {
   currentMonday: null,
   activeFilter: 'target', // 'target' (my courses) or 'all'
-  selectedDayDate: 'all',  // 'all' or '28-09-2026'
+  selectedDayDate: formatFormattedDate(new Date()),  // Defaults to today
   calendarData: null,
   searchQuery: '',
   config: null,           // { anno, corso, corsoLabel, anni: [...], anniLabels: [...], favorites: [{code, label}] }
@@ -399,6 +399,11 @@ function setupEventListeners() {
     setFilter('all');
   });
 
+  const btnQuickExt = document.getElementById('btnQuickAddExternal');
+  if (btnQuickExt) {
+    btnQuickExt.addEventListener('click', openAddExternalCourseModal);
+  }
+
   // Week Navigation
   document.getElementById('btnPrevWeek').addEventListener('click', () => {
     changeWeek(-7);
@@ -410,7 +415,7 @@ function setupEventListeners() {
 
   document.getElementById('btnToday').addEventListener('click', () => {
     state.currentMonday = formatFormattedDate(getMonday(new Date()));
-    state.selectedDayDate = 'all';
+    state.selectedDayDate = formatFormattedDate(new Date());
     loadCalendar(state.currentMonday);
   });
 
@@ -690,6 +695,31 @@ function setupEventListeners() {
     updateSaveButton();
   });
 
+  // External courses modal listeners
+  const btnOpenExtSetup = document.getElementById('btnOpenAddExternalFromSetup');
+  if (btnOpenExtSetup) {
+    btnOpenExtSetup.addEventListener('click', () => {
+      openAddExternalCourseModal();
+    });
+  }
+  const btnCloseExt = document.getElementById('btnCloseAddExternalCourse');
+  if (btnCloseExt) btnCloseExt.addEventListener('click', closeAddExternalCourseModal);
+  const btnConfirmExt = document.getElementById('btnConfirmAddExternalCourse');
+  if (btnConfirmExt) btnConfirmExt.addEventListener('click', confirmAddExternalCourse);
+
+  const extYear = document.getElementById('extCourseYear');
+  if (extYear) extYear.addEventListener('change', onExtYearChange);
+  const extArea = document.getElementById('extCourseArea');
+  if (extArea) extArea.addEventListener('change', onExtAreaChange);
+  const extCourse = document.getElementById('extCourseSelect');
+  if (extCourse) extCourse.addEventListener('change', onExtCourseChange);
+  const extStudyYear = document.getElementById('extCourseStudyYear');
+  if (extStudyYear) extStudyYear.addEventListener('change', onExtStudyYearChange);
+  const extTeaching = document.getElementById('extCourseTeaching');
+  if (extTeaching) extTeaching.addEventListener('change', onExtTeachingChange);
+  const extSearch = document.getElementById('extCourseTeachingSearch');
+  if (extSearch) extSearch.addEventListener('input', onExtTeachingSearch);
+
   // Swipe support for mobile
   let touchStartX = 0;
   let touchEndX = 0;
@@ -748,7 +778,8 @@ function saveConfig(cfg) {
 function configKey() {
   const c = state.config;
   if (!c) return 'default';
-  return `${c.anno}_${c.corso}_${(c.anni || []).join(',')}`;
+  const extKey = (c.externalCourses || []).map(e => `${e.corso}_${e.code}`).join(',');
+  return `${c.anno}_${c.corso}_${(c.anni || []).join(',')}_${extKey}`;
 }
 
 function clearCalendarCache() {
@@ -765,15 +796,21 @@ function clearCalendarCache() {
 function applyConfig() {
   const cfg = state.config;
   state.favoriteColors = {};
-  (cfg.favorites || []).forEach((f, i) => {
+  const allFavorites = [
+    ...(cfg.favorites || []),
+    ...(cfg.externalCourses || []).map(ext => ({ code: ext.code, label: ext.label }))
+  ];
+  allFavorites.forEach((f, i) => {
     state.favoriteColors[f.code] = FAVORITE_COLORS[i % FAVORITE_COLORS.length];
   });
 
   if (state.activeTab === 'timetable') {
     document.getElementById('headerSubtitle').textContent = `${cfg.corsoLabel} · ${cfg.anniLabels.join(', ')}`;
   }
-  setFilter(cfg.favorites && cfg.favorites.length ? 'target' : 'all');
+  const hasFavs = (cfg.favorites && cfg.favorites.length) || (cfg.externalCourses && cfg.externalCourses.length);
+  setFilter(hasFavs ? 'target' : 'all');
   renderExamCourseChips();
+  renderExternalCoursesUI();
 }
 
 // ---------- Share link (?anno=2026&corso=F1801Q&anno2=GGG%7C2&fav=EC523651,EC523669) ----------
@@ -1324,6 +1361,8 @@ async function openSetup(presetOverride, pendingProfile) {
     if (btnSave) btnSave.textContent = 'Salva';
   }
 
+  renderExternalCoursesUI();
+
   const preset = presetOverride || state.config || {};
   const seq = ++setup.seq;
   const yearSelect = document.getElementById('cfgYear');
@@ -1482,7 +1521,8 @@ async function saveSetup() {
     corsoLabel: course.label,
     anni,
     anniLabels: anni.map(a => (course.years.find(y => y.value === a) || { label: a }).label),
-    favorites
+    favorites,
+    externalCourses: (state.config && state.config.externalCourses) || []
   };
 
   // Step 2 profile creation flow
@@ -1589,6 +1629,345 @@ function getCheckedValues(containerId) {
   return Array.from(document.querySelectorAll(`#${containerId} input[type="checkbox"]:checked`)).map(i => i.value);
 }
 
+// ---------- External Courses (Corsi da altri corsi di laurea) ----------
+
+let extSetup = {
+  seq: 0,
+  courses: [],
+  teachings: [],
+  allTeachings: []
+};
+
+function renderExternalCoursesUI() {
+  const chipsBar = document.getElementById('externalCoursesChipsBar');
+  const extList = document.getElementById('cfgExternalCoursesList');
+  const extCourses = (state.config && state.config.externalCourses) || [];
+
+  // 1. Update chips bar in Timetable view
+  if (chipsBar) {
+    if (extCourses.length > 0) {
+      chipsBar.style.display = 'flex';
+      chipsBar.innerHTML = extCourses.map(ext => `
+        <span class="course-chip external" title="${escapeHtml(ext.corsoLabel || ext.corso)} · ${escapeHtml(ext.anno2Label || '')}">
+          <span>🌐</span>
+          <span>${escapeHtml(ext.label)}</span>
+          <button class="course-chip-remove" data-code="${escapeHtml(ext.code)}" type="button" title="Rimuovi corso esterno">✕</button>
+        </span>
+      `).join('');
+      chipsBar.querySelectorAll('.course-chip-remove').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const code = btn.dataset.code;
+          removeExternalCourse(code);
+        });
+      });
+    } else {
+      chipsBar.style.display = 'none';
+      chipsBar.innerHTML = '';
+    }
+  }
+
+  // 2. Update list in setup modal
+  if (extList) {
+    if (extCourses.length > 0) {
+      extList.innerHTML = extCourses.map(ext => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:rgba(255,255,255,0.04); border-radius:8px; margin-bottom:6px; border:1px solid var(--border-color);">
+          <div style="flex:1; min-width:0; margin-right:8px;">
+            <strong style="font-size:0.84rem; color:#FFF; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(ext.label)}</strong>
+            <span style="font-size:0.74rem; color:var(--text-secondary); display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              ${escapeHtml(ext.corsoLabel || ext.corso)} · ${escapeHtml(ext.anno2Label || ext.anno2)}${ext.docente ? ` · ${escapeHtml(ext.docente)}` : ''}
+            </span>
+          </div>
+          <button class="btn-icon btn-remove-ext-setup" data-code="${escapeHtml(ext.code)}" type="button" style="width:28px; height:28px; color:#EF4444; flex-shrink:0;" title="Rimuovi">✕</button>
+        </div>
+      `).join('');
+      extList.querySelectorAll('.btn-remove-ext-setup').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const code = btn.dataset.code;
+          removeExternalCourse(code);
+        });
+      });
+    } else {
+      extList.innerHTML = '<p class="field-hint">Nessun corso esterno aggiunto.</p>';
+    }
+  }
+}
+
+function removeExternalCourse(code) {
+  if (!state.config || !state.config.externalCourses) return;
+  const removed = state.config.externalCourses.find(e => e.code === code);
+  state.config.externalCourses = state.config.externalCourses.filter(e => e.code !== code);
+  saveConfig(state.config);
+  clearCalendarCache();
+  applyConfig();
+  loadCalendar(state.currentMonday);
+  showToast(`Rimosso: ${removed ? removed.label : code}`);
+}
+
+async function openAddExternalCourseModal() {
+  if (!state.config) {
+    showToast('Configura prima il tuo corso principale.');
+    openSetup();
+    return;
+  }
+  document.getElementById('addExternalCourseModal').classList.add('active');
+  const yearSelect = document.getElementById('extCourseYear');
+  const areaSelect = document.getElementById('extCourseArea');
+  const degreeSelect = document.getElementById('extCourseSelect');
+  const studyYearSelect = document.getElementById('extCourseStudyYear');
+  const teachingSelect = document.getElementById('extCourseTeaching');
+  const confirmBtn = document.getElementById('btnConfirmAddExternalCourse');
+  const searchBox = document.getElementById('extCourseTeachingSearchBox');
+  const searchInput = document.getElementById('extCourseTeachingSearch');
+
+  if (searchInput) searchInput.value = '';
+  if (searchBox) searchBox.style.display = 'none';
+  if (confirmBtn) confirmBtn.disabled = true;
+
+  fillSelect(yearSelect, [], 'Caricamento...');
+  fillSelect(areaSelect, [], 'Caricamento aree...');
+  fillSelect(degreeSelect, [], 'Seleziona prima l\'area');
+  degreeSelect.disabled = true;
+  fillSelect(studyYearSelect, [], 'Seleziona prima il corso');
+  studyYearSelect.disabled = true;
+  fillSelect(teachingSelect, [], 'Seleziona prima l\'anno di studio');
+  teachingSelect.disabled = true;
+
+  try {
+    const data = await fetchJson('/api/options');
+    const years = data.academic_years || [];
+    fillSelect(yearSelect, years, null);
+    if (state.config.anno && years.some(y => y.value === state.config.anno)) {
+      yearSelect.value = state.config.anno;
+    }
+    await onExtYearChange();
+  } catch (err) {
+    console.error('Options error:', err);
+    fillSelect(yearSelect, [], 'Errore caricamento');
+    showToast('Impossibile caricare le opzioni da UNIMIB.');
+  }
+}
+
+function closeAddExternalCourseModal() {
+  document.getElementById('addExternalCourseModal').classList.remove('active');
+}
+
+async function onExtYearChange() {
+  const seq = ++extSetup.seq;
+  const areaSelect = document.getElementById('extCourseArea');
+  const degreeSelect = document.getElementById('extCourseSelect');
+  const studyYearSelect = document.getElementById('extCourseStudyYear');
+  const teachingSelect = document.getElementById('extCourseTeaching');
+  const confirmBtn = document.getElementById('btnConfirmAddExternalCourse');
+
+  if (confirmBtn) confirmBtn.disabled = true;
+  fillSelect(areaSelect, [], 'Caricamento aree...');
+  areaSelect.disabled = true;
+  fillSelect(degreeSelect, [], 'Seleziona prima l\'area');
+  degreeSelect.disabled = true;
+  fillSelect(studyYearSelect, [], 'Seleziona prima il corso');
+  studyYearSelect.disabled = true;
+  fillSelect(teachingSelect, [], 'Seleziona prima l\'anno di studio');
+  teachingSelect.disabled = true;
+
+  try {
+    const anno = document.getElementById('extCourseYear').value;
+    const data = await fetchJson(`/api/options?anno=${encodeURIComponent(anno)}`);
+    if (seq !== extSetup.seq) return;
+    extSetup.courses = data.courses || [];
+    fillSelect(areaSelect, data.areas || [], 'Seleziona area...');
+    areaSelect.disabled = false;
+  } catch (err) {
+    console.error('Error fetching areas:', err);
+    fillSelect(areaSelect, [], 'Errore caricamento');
+    showToast('Impossibile caricare le aree didattiche.');
+  }
+}
+
+function onExtAreaChange() {
+  const areaSelect = document.getElementById('extCourseArea');
+  const degreeSelect = document.getElementById('extCourseSelect');
+  const studyYearSelect = document.getElementById('extCourseStudyYear');
+  const teachingSelect = document.getElementById('extCourseTeaching');
+  const confirmBtn = document.getElementById('btnConfirmAddExternalCourse');
+
+  if (confirmBtn) confirmBtn.disabled = true;
+  fillSelect(studyYearSelect, [], 'Seleziona prima il corso');
+  studyYearSelect.disabled = true;
+  fillSelect(teachingSelect, [], 'Seleziona prima l\'anno di studio');
+  teachingSelect.disabled = true;
+
+  const area = areaSelect.value;
+  if (!area) {
+    fillSelect(degreeSelect, [], 'Seleziona prima l\'area');
+    degreeSelect.disabled = true;
+    return;
+  }
+
+  const courses = extSetup.courses
+    .filter(c => c.area === area)
+    .map(c => ({ value: c.value, label: `${c.value} - ${c.label}${c.type ? ` (${c.type})` : ''}` }));
+  fillSelect(degreeSelect, courses, 'Seleziona corso di studio...');
+  degreeSelect.disabled = false;
+}
+
+async function onExtCourseChange() {
+  const seq = ++extSetup.seq;
+  const degreeSelect = document.getElementById('extCourseSelect');
+  const studyYearSelect = document.getElementById('extCourseStudyYear');
+  const teachingSelect = document.getElementById('extCourseTeaching');
+  const confirmBtn = document.getElementById('btnConfirmAddExternalCourse');
+  const searchBox = document.getElementById('extCourseTeachingSearchBox');
+  const statusHint = document.getElementById('extCourseStatusHint');
+
+  if (confirmBtn) confirmBtn.disabled = true;
+  if (searchBox) searchBox.style.display = 'none';
+
+  const corso = degreeSelect.value;
+  if (!corso) {
+    fillSelect(studyYearSelect, [], 'Seleziona prima il corso');
+    studyYearSelect.disabled = true;
+    fillSelect(teachingSelect, [], 'Seleziona prima l\'anno di studio');
+    teachingSelect.disabled = true;
+    return;
+  }
+
+  const courseObj = extSetup.courses.find(c => c.value === corso);
+  if (!courseObj || !courseObj.years.length) {
+    fillSelect(studyYearSelect, [], 'Nessun anno disponibile');
+    studyYearSelect.disabled = true;
+    return;
+  }
+
+  const yearOptions = courseObj.years.map(y => ({ value: y.value, label: y.label }));
+  fillSelect(studyYearSelect, yearOptions, 'Seleziona anno di studio...');
+  studyYearSelect.disabled = false;
+  fillSelect(teachingSelect, [], 'Caricamento insegnamenti...');
+  teachingSelect.disabled = true;
+  if (statusHint) statusHint.style.display = 'block';
+
+  try {
+    const anno = document.getElementById('extCourseYear').value;
+    const data = await fetchJson(`/api/options?anno=${encodeURIComponent(anno)}&corso=${encodeURIComponent(corso)}`);
+    if (seq !== extSetup.seq) return;
+    extSetup.teachings = data.years || [];
+    if (yearOptions.length === 1) {
+      studyYearSelect.value = yearOptions[0].value;
+      onExtStudyYearChange();
+    } else {
+      fillSelect(teachingSelect, [], 'Seleziona prima l\'anno di studio');
+    }
+  } catch (err) {
+    console.error('Teachings error:', err);
+    fillSelect(teachingSelect, [], 'Errore caricamento');
+  } finally {
+    if (statusHint) statusHint.style.display = 'none';
+  }
+}
+
+function onExtStudyYearChange() {
+  const studyYearSelect = document.getElementById('extCourseStudyYear');
+  const teachingSelect = document.getElementById('extCourseTeaching');
+  const confirmBtn = document.getElementById('btnConfirmAddExternalCourse');
+  const searchBox = document.getElementById('extCourseTeachingSearchBox');
+  const searchInput = document.getElementById('extCourseTeachingSearch');
+
+  if (confirmBtn) confirmBtn.disabled = true;
+  const anno2 = studyYearSelect.value;
+  if (!anno2) {
+    fillSelect(teachingSelect, [], 'Seleziona prima l\'anno di studio');
+    teachingSelect.disabled = true;
+    if (searchBox) searchBox.style.display = 'none';
+    return;
+  }
+
+  const yearData = extSetup.teachings.find(y => y.value === anno2);
+  const teachings = (yearData && yearData.teachings) || [];
+  extSetup.allTeachings = teachings;
+
+  renderExtTeachingsSelect(teachings);
+  teachingSelect.disabled = false;
+  if (teachings.length > 5 && searchBox) {
+    searchBox.style.display = 'block';
+    if (searchInput) searchInput.value = '';
+  } else if (searchBox) {
+    searchBox.style.display = 'none';
+  }
+}
+
+function renderExtTeachingsSelect(teachingsList) {
+  const teachingSelect = document.getElementById('extCourseTeaching');
+  const opts = teachingsList.map(t => ({
+    value: t.code,
+    label: `${t.label}${t.docente ? ` (${t.docente})` : ''}`
+  }));
+  fillSelect(teachingSelect, opts, 'Seleziona insegnamento / materia...');
+}
+
+function onExtTeachingSearch() {
+  const q = (document.getElementById('extCourseTeachingSearch')?.value || '').toLowerCase().trim();
+  const filtered = q
+    ? extSetup.allTeachings.filter(t => t.label.toLowerCase().includes(q) || (t.docente || '').toLowerCase().includes(q) || (t.code || '').toLowerCase().includes(q))
+    : extSetup.allTeachings;
+  renderExtTeachingsSelect(filtered);
+}
+
+function onExtTeachingChange() {
+  const teachingSelect = document.getElementById('extCourseTeaching');
+  const confirmBtn = document.getElementById('btnConfirmAddExternalCourse');
+  if (confirmBtn) confirmBtn.disabled = !teachingSelect.value;
+}
+
+function confirmAddExternalCourse() {
+  const yearSelect = document.getElementById('extCourseYear');
+  const degreeSelect = document.getElementById('extCourseSelect');
+  const studyYearSelect = document.getElementById('extCourseStudyYear');
+  const teachingSelect = document.getElementById('extCourseTeaching');
+
+  const anno = yearSelect.value;
+  const corso = degreeSelect.value;
+  const courseObj = extSetup.courses.find(c => c.value === corso);
+  const corsoLabel = courseObj ? courseObj.label : corso;
+  const anno2 = studyYearSelect.value;
+  const yearObj = courseObj ? courseObj.years.find(y => y.value === anno2) : null;
+  const anno2Label = yearObj ? yearObj.label : anno2;
+  const code = teachingSelect.value;
+
+  const tObj = extSetup.allTeachings.find(t => t.code === code);
+  const label = tObj ? tObj.label : code;
+  const docente = tObj ? tObj.docente : '';
+
+  if (!state.config) return;
+  if (!state.config.externalCourses) {
+    state.config.externalCourses = [];
+  }
+
+  // Check if already added
+  if (state.config.externalCourses.some(e => e.code === code)) {
+    showToast('Questa materia è già presente nei tuoi corsi esterni.');
+    closeAddExternalCourseModal();
+    return;
+  }
+
+  state.config.externalCourses.push({
+    anno,
+    corso,
+    corsoLabel,
+    anno2,
+    anno2Label,
+    code,
+    label,
+    docente
+  });
+
+  saveConfig(state.config);
+  clearCalendarCache();
+  closeAddExternalCourseModal();
+  applyConfig();
+  loadCalendar(state.currentMonday);
+  showToast(`🎉 Aggiunto: ${label} (${corsoLabel})!`);
+}
+
 // ---------- Calendar ----------
 
 function setFilter(filterType) {
@@ -1609,7 +1988,8 @@ function changeWeek(dayOffset) {
   // Ensure it's Monday
   const monday = getMonday(dt);
   state.currentMonday = formatFormattedDate(monday);
-  state.selectedDayDate = 'all';
+  const thisMonday = formatFormattedDate(getMonday(new Date()));
+  state.selectedDayDate = (state.currentMonday === thisMonday) ? formatFormattedDate(new Date()) : 'all';
   loadCalendar(state.currentMonday);
 }
 
@@ -2137,6 +2517,9 @@ function renderScheduleChangesModalList() {
 function calendarUrl(mondayDateStr, forceRefresh) {
   const params = new URLSearchParams({ anno: state.config.anno, corso: state.config.corso, date: mondayDateStr });
   state.config.anni.forEach(a => params.append('anno2', a));
+  if (state.config.externalCourses && state.config.externalCourses.length > 0) {
+    params.set('extra', JSON.stringify(state.config.externalCourses));
+  }
   if (forceRefresh) params.set('refresh', '1');
   return `/api/calendar?${params}`;
 }
@@ -2214,6 +2597,20 @@ function renderCalendar() {
   // Update week header label
   document.getElementById('weekLabelText').textContent = state.calendarData.week_label || state.currentMonday;
 
+  // Ensure selectedDayDate is valid for this week
+  const giorni = state.calendarData.giorni || [];
+  const todayStr = formatFormattedDate(new Date());
+  if (state.selectedDayDate !== 'all') {
+    const hasSelectedDay = giorni.some(g => g.data === state.selectedDayDate);
+    if (!hasSelectedDay) {
+      if (giorni.some(g => g.data === todayStr)) {
+        state.selectedDayDate = todayStr;
+      } else {
+        state.selectedDayDate = 'all';
+      }
+    }
+  }
+
   renderDayTabs();
   renderEvents();
 }
@@ -2274,6 +2671,14 @@ function renderDayTabs() {
 
     tabsContainer.appendChild(tab);
   });
+
+  // Ensure active day tab is scrolled into view in horizontal container
+  requestAnimationFrame(() => {
+    const activeTab = tabsContainer.querySelector('.day-tab.active');
+    if (activeTab) {
+      activeTab.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  });
 }
 
 function isFavorite(e) {
@@ -2286,13 +2691,16 @@ function renderEvents() {
 
   if (!state.calendarData || !state.calendarData.events) return;
 
-  const hasFavorites = state.config && state.config.favorites && state.config.favorites.length > 0;
+  const hasFavorites = state.config && (
+    (state.config.favorites && state.config.favorites.length > 0) ||
+    (state.config.externalCourses && state.config.externalCourses.length > 0)
+  );
   if (state.activeFilter === 'target' && !hasFavorites) {
     container.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">⭐</div>
         <h3>Nessun corso preferito</h3>
-        <p>Scegli i tuoi corsi per vederli evidenziati e filtrati qui.</p>
+        <p>Scegli i tuoi corsi o aggiungi un corso esterno per vederli evidenziati e filtrati qui.</p>
         <button class="btn-primary" style="margin-top:15px; width:auto;" onclick="openSetup()">Scegli i miei corsi</button>
       </div>
     `;
@@ -2421,10 +2829,17 @@ function renderEvents() {
         }
       }
 
+      const externalBadgeHtml = e.is_external
+        ? `<span class="badge-external" title="Corso di studio esterno: ${escapeHtml(e.external_corso || '')}">🌐 ${escapeHtml(e.external_corso || 'Corso esterno')}</span>`
+        : '';
+
       card.innerHTML = `
         <div class="card-top">
           <span class="time-badge">⏰ ${escapeHtml(e.start_time)} - ${escapeHtml(e.end_time)}</span>
-          ${color ? '<span class="course-badge">⭐ Mio corso</span>' : ''}
+          <div style="display:flex; align-items:center; gap:6px;">
+            ${externalBadgeHtml}
+            ${color ? '<span class="course-badge">⭐ Mio corso</span>' : ''}
+          </div>
         </div>
         ${isCanceled ? '<div class="canceled-banner">⚠️ LEZIONE ANNULLATA</div>' : ''}
         <div class="course-title ${isCanceled ? 'canceled-text' : ''}">${escapeHtml(e.course)}</div>

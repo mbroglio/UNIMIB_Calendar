@@ -1275,6 +1275,41 @@ body {
   color: #E2E8F0;
 }
 
+.course-chip.external {
+  background: rgba(139, 92, 246, 0.18);
+  border-color: rgba(139, 92, 246, 0.45);
+  color: #DDD6FE;
+}
+
+.course-chip-remove {
+  background: none;
+  border: none;
+  color: #94A3B8;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 0.85rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+.course-chip-remove:hover {
+  color: #EF4444;
+}
+
+.badge-external {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: rgba(139, 92, 246, 0.25);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  color: #DDD6FE;
+}
+
 .course-chip-add {
   background: rgba(255, 255, 255, 0.05);
   border: 1px dashed var(--accent-cyan);

@@ -21,7 +21,7 @@ import time
 import urllib.request
 import urllib.parse
 from http.server import BaseHTTPRequestHandler
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import concurrent.futures
 
 GRID_URL = 'https://gestioneorari.didattica.unimib.it/PortaleStudentiUnimib/grid_call.php'
@@ -219,11 +219,26 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"error": "Parametri insufficienti. Specificare 'code' oppure 'anno', 'corso' e 'anno2'."}).encode())
             return
 
+        extra_arg = qs.get("extra", [""])[0].strip()
+        extra_courses = cfg.get("externalCourses") or []
+        if extra_arg:
+            try:
+                parsed_extra = json.loads(extra_arg)
+                if isinstance(parsed_extra, list):
+                    extra_courses = parsed_extra
+            except Exception:
+                pass
+
         anno = cfg["anno"]
         corso = cfg["corso"]
         anni = tuple(sorted(cfg.get("anni", [])))
         favorites = cfg.get("favorites") or []
-        fav_set = {f["code"].upper() for f in favorites if f.get("code")} if favorites else None
+        fav_set = {f["code"].upper() for f in favorites if f.get("code")} if favorites else set()
+        for ext in extra_courses:
+            if ext.get("code"):
+                fav_set.add(ext["code"].upper())
+        if not fav_set and not favorites:
+            fav_set = None
 
         # Filter mode: 'all' to export all courses, or default favorites if defined
         filter_mode = qs.get("filter", ["target"])[0].strip().lower()
@@ -245,18 +260,46 @@ class handler(BaseHTTPRequestHandler):
         # ── 2. Fetch Weeks in Parallel ───────────────────────────────────────
         weeks_mondays = [(start_monday + timedelta(days=7 * w)).strftime("%d-%m-%Y") for w in range(weeks_count)]
 
-        week_cells = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(weeks_count, 8)) as executor:
-            future_to_mon = {
-                executor.submit(_fetch_unimib_grid, anno, corso, anni, mon): mon
-                for mon in weeks_mondays
-            }
-            for future in concurrent.futures.as_completed(future_to_mon):
-                mon = future_to_mon[future]
+        # Prepare external grid specs
+        ext_specs = []
+        ext_codes_set = set()
+        for ext in extra_courses:
+            if not isinstance(ext, dict):
+                continue
+            ext_c = ext.get("corso", "").strip()
+            if not ext_c:
+                continue
+            ext_a = ext.get("anno") or anno
+            ext_y = ext.get("anno2") or []
+            if isinstance(ext_y, str):
+                ext_y = [ext_y]
+            ext_y_tuple = tuple(sorted([y for y in ext_y if y]))
+            if not ext_y_tuple:
+                continue
+            ext_code = (ext.get("code") or "").upper()
+            if ext_code:
+                ext_codes_set.add(ext_code)
+            ext_specs.append((ext_a, ext_c, ext_y_tuple, ext_code))
+
+        week_cells = {mon: [] for mon in weeks_mondays}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(weeks_count * (1 + len(ext_specs)), 12)) as executor:
+            future_to_info = {}
+            for mon in weeks_mondays:
+                f_main = executor.submit(_fetch_unimib_grid, anno, corso, anni, mon)
+                future_to_info[f_main] = (mon, None)
+                for (ea, ec, ey, ecode) in ext_specs:
+                    f_ext = executor.submit(_fetch_unimib_grid, ea, ec, ey, mon)
+                    future_to_info[f_ext] = (mon, ecode)
+
+            for future in concurrent.futures.as_completed(future_to_info):
+                mon, required_code = future_to_info[future]
                 try:
-                    week_cells[mon] = future.result()
+                    cells = future.result()
+                    if required_code:
+                        cells = [c for c in cells if c.get("codice_insegnamento", "").upper() == required_code]
+                    week_cells[mon].extend(cells)
                 except Exception:
-                    week_cells[mon] = []
+                    pass
 
         # ── 3. Deduplicate and Filter Events ─────────────────────────────────
         seen_events = set()
@@ -356,7 +399,7 @@ class handler(BaseHTTPRequestHandler):
 
         else:
             # Default: iCalendar (.ics) [RFC 5545]
-            now_stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+            now_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             vcalendar_lines = [
                 "BEGIN:VCALENDAR",
                 "VERSION:2.0",

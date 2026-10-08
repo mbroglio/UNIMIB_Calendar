@@ -248,18 +248,36 @@ class handler(BaseHTTPRequestHandler):
             favorites      = cfg.get("favorites") or []
             favorite_codes = [f.get("code", "") for f in favorites if f.get("code")] if favorites else None
 
+            grid_keys = []
             if anno and corso and anni:
                 grid_key = (anno, corso, anni)
                 needed_grids.add(grid_key)
-            else:
-                grid_key = None
+                grid_keys.append((grid_key, favorite_codes))
+
+            external_courses = cfg.get("externalCourses") or []
+            for ext in external_courses:
+                if not isinstance(ext, dict):
+                    continue
+                ext_c = ext.get("corso", "").strip()
+                if not ext_c:
+                    continue
+                ext_a = ext.get("anno") or anno
+                ext_y = ext.get("anno2") or []
+                if isinstance(ext_y, str):
+                    ext_y = [ext_y]
+                ext_tuple = tuple(sorted([y for y in ext_y if y]))
+                if not ext_tuple:
+                    continue
+                ext_grid_key = (ext_a, ext_c, ext_tuple)
+                needed_grids.add(ext_grid_key)
+                ext_code = ext.get("code")
+                grid_keys.append((ext_grid_key, [ext_code] if ext_code else None))
 
             students_plan.append({
                 "share_id":       share_id,
                 "nickname":       nickname,
                 "color":          color,
-                "grid_key":       grid_key,
-                "favorite_codes": favorite_codes
+                "grid_keys":      grid_keys,
             })
 
         # ── 3. Parallel Fetch of Distinct UNIMIB Grids ────────────────────────
@@ -288,15 +306,15 @@ class handler(BaseHTTPRequestHandler):
                 "color":      sp["color"]
             })
 
-            grid_key = sp["grid_key"]
-            if grid_key and grid_key in grids_data:
-                cells = grids_data[grid_key]
-                student_events = _extract_events_from_cells(cells, sp["favorite_codes"])
-                for ev in student_events:
-                    ev["profile_id"] = sp["share_id"]
-                    ev["nickname"]   = sp["nickname"]
-                    ev["color"]      = sp["color"]
-                all_events.extend(student_events)
+            for (g_key, allowed_codes) in sp.get("grid_keys", []):
+                if g_key and g_key in grids_data:
+                    cells = grids_data[g_key]
+                    student_events = _extract_events_from_cells(cells, allowed_codes)
+                    for ev in student_events:
+                        ev["profile_id"] = sp["share_id"]
+                        ev["nickname"]   = sp["nickname"]
+                        ev["color"]      = sp["color"]
+                    all_events.extend(student_events)
 
         # Sort: date (YYYY-MM-DD for lexicographic sort) then start_time then nickname
         def _sort_key(e):
