@@ -25,7 +25,8 @@ jobs:
           python-version: "3.12"
 
       - name: Install Python coverage tool
-        run: python3 -m pip install --no-cache-dir coverage
+        run: |
+          python3 -m pip install --no-cache-dir --only-binary :all: coverage==7.17.3
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -44,14 +45,14 @@ jobs:
 
       - name: Analyze with SonarQube Cloud (PR)
         if: ${{ github.event_name == 'pull_request' }}
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Analyze with SonarQube Cloud (Branch)
         if: ${{ github.event_name != 'pull_request' }}
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
