@@ -1,32 +1,60 @@
-# CI workflow for UNIMIB Calendar test suite
-name: CI Test Suite
+# CI workflow for UNIMIB Calendar test suite and SonarQube Cloud analysis
+name: CI & SonarQube Cloud
 
 on:
   push:
-    branches: [ main, miglioramenti ]
+    branches:
+      - "**"
   pull_request:
-    branches: [ main, miglioramenti ]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
 
 jobs:
-  test:
-    name: Run Unit Tests
+  test-and-analyze:
+    name: Test & SonarQube Cloud
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
+
+      - name: Install Python coverage tool
+        run: python3 -m pip install --no-cache-dir coverage
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "22"
 
-      - name: Run Backend Tests
-        run: python3 -m unittest discover -s tests/backend -p "test_*.py"
+      - name: Run Backend Tests with Coverage
+        run: |
+          python3 -m coverage run --source=api,dev_server -m unittest discover -s tests/backend -p "test_*.py"
+          python3 -m coverage xml -o coverage.xml
 
-      - name: Run Frontend Tests
-        run: node --test tests/frontend/*.test.js
+      - name: Run Frontend Tests with Coverage
+        run: |
+          mkdir -p coverage
+          node --test --experimental-test-coverage --test-reporter=spec --test-reporter-destination=stdout --test-reporter=lcov --test-reporter-destination=coverage/lcov.info tests/frontend/*.test.js
+
+      - name: Analyze with SonarQube Cloud (PR)
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Analyze with SonarQube Cloud (Branch)
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.branch.name=${{ github.ref_name }}

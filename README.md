@@ -56,11 +56,9 @@ View lecture timetables, check real-time classroom occupancy, track exam session
 │   ├── index.html          # SPA entry point
 │   ├── manifest.json       # Web App Manifest
 │   └── sw.js               # PWA Service Worker (offline asset cache, stale-while-revalidate)
-├── scratch/
-│   ├── test_edge_cases.py     # Backend unit tests
-│   ├── test_issues_7_8.py     # Integration & external course tests
-│   ├── test_phase3_cache.py    # API caching & error handling tests
-│   └── test_rooms_midnight.py # Real-time midnight classroom occupancy tests
+├── tests/
+│   ├── backend/               # Backend unit tests
+│   └── frontend/              # Frontend unit tests
 ├── vercel.json                # Serverless routing and rewrites
 └── README.md
 ```

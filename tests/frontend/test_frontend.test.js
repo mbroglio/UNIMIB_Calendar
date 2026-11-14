@@ -76,7 +76,7 @@ const sandbox = {
 sandbox.window = sandbox;
 
 const context = vm.createContext(sandbox);
-vm.runInContext(appJsCode, context);
+vm.runInContext(appJsCode, context, { filename: appJsPath });
 
 test('detectAreaColor maps degrees and keywords to correct colors', () => {
   const detectAreaColor = sandbox.detectAreaColor;

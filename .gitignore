@@ -11,3 +11,6 @@ ENV/
 .vercel
 .env*
 !.env.example
+.coverage
+coverage.xml
+coverage/
