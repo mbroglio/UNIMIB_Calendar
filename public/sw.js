@@ -20,10 +20,11 @@ const ASSETS = [
 
 function trimCache(cacheName, maxItems) {
   caches.open(cacheName).then((cache) => {
-    cache.keys().then((keys) => {
+    return cache.keys().then((keys) => {
       if (keys.length > maxItems) {
-        cache.delete(keys[0]).then(() => trimCache(cacheName, maxItems));
+        return cache.delete(keys[0]).then(() => trimCache(cacheName, maxItems));
       }
+      return undefined;
     });
   }).catch(() => {});
 }
@@ -72,7 +73,7 @@ self.addEventListener('fetch', (event) => {
         try {
           const networkResponse = await fetch(event.request);
           if (networkResponse && networkResponse.status === 200) {
-            fontCache.put(event.request, networkResponse.clone());
+            void fontCache.put(event.request, networkResponse.clone());
           }
           return networkResponse;
         } catch (err) {
@@ -99,8 +100,8 @@ self.addEventListener('fetch', (event) => {
         .then((response) => {
           if (response.ok && response.status === 200) {
             const resClone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, resClone);
+            void caches.open(CACHE_NAME).then((cache) => {
+              void cache.put(event.request, resClone);
               trimCache(CACHE_NAME, MAX_API_ENTRIES);
             });
           }
@@ -120,7 +121,7 @@ self.addEventListener('fetch', (event) => {
       const fetchPromise = fetch(event.request)
         .then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
-            cache.put(event.request, networkResponse.clone());
+            void cache.put(event.request, networkResponse.clone());
           }
           return networkResponse;
         })

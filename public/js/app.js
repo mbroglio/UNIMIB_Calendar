@@ -148,7 +148,7 @@ function extractBuildingCode(roomString) {
   if (!roomString || typeof roomString !== 'string') return null;
   const m = roomString.match(/\bU0*(\d{1,2})\b/i);
   if (m) {
-    const num = parseInt(m[1], 10);
+    const num = Number.parseInt(m[1], 10);
     return `U${num}`;
   }
   return null;
@@ -532,7 +532,7 @@ function initApp() {
   setupEventListeners();
   updateRoomsDateDisplay();
   registerServiceWorker();
-  syncGroupCloud();
+  void syncGroupCloud();
 
   state.currentMonday = formatFormattedDate(getMonday(new Date()));
   state.config = loadConfig();
@@ -545,7 +545,7 @@ function initApp() {
   const tabParam = urlParams.get('tab');
 
   if (shared) {
-    enterPreview(shared);
+    void enterPreview(shared);
   } else if (friendParam) {
     if (state.config) {
       applyConfig();
@@ -554,14 +554,14 @@ function initApp() {
       // doesn't get stuck in an infinite loading state.
       showWelcome();
     }
-    handleFriendShareUrl(friendParam);
+    void handleFriendShareUrl(friendParam);
   } else if (groupParam) {
     if (state.config) {
       applyConfig();
     } else {
       showWelcome();
     }
-    handleSharedGroupUrl(groupParam);
+    void handleSharedGroupUrl(groupParam);
   } else if (teacherParam) {
     if (state.config) {
       applyConfig();
@@ -569,7 +569,7 @@ function initApp() {
       showWelcome();
     }
     switchTab('teachers');
-    handleTeacherParam(teacherParam);
+    void handleTeacherParam(teacherParam);
   } else if (tabParam === 'docenti' || tabParam === 'teachers') {
     if (state.config) {
       applyConfig();
@@ -579,7 +579,7 @@ function initApp() {
     switchTab('teachers');
   } else if (state.config) {
     applyConfig();
-    loadCalendar(state.currentMonday);
+    void loadCalendar(state.currentMonday);
   } else {
     const guestChosen = localStorage.getItem('unimib_guest_chosen');
     if (!profileState.id && !guestChosen) {
@@ -587,7 +587,7 @@ function initApp() {
       openOnboardingModal();
     } else {
       showWelcome();
-      openSetup();
+      void openSetup();
     }
   }
 }
@@ -652,7 +652,7 @@ function setupEventListeners() {
       el.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          handleLoginProfile();
+          void handleLoginProfile();
         }
       });
     }
@@ -707,11 +707,11 @@ function setupEventListeners() {
 
   // Enter key support for modal inputs
   const createGrpInp = document.getElementById('createGroupNameInput');
-  if (createGrpInp) createGrpInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmCreateGroup(); });
+  if (createGrpInp) createGrpInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') void confirmCreateGroup(); });
   const renameGrpInp = document.getElementById('renameGroupNameInput');
-  if (renameGrpInp) renameGrpInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmRenameGroup(); });
+  if (renameGrpInp) renameGrpInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') void confirmRenameGroup(); });
   const joinGrpInp = document.getElementById('joinGroupCodeInput');
-  if (joinGrpInp) joinGrpInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') confirmJoinGroup(); });
+  if (joinGrpInp) joinGrpInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') void confirmJoinGroup(); });
 
   // Friends / shared calendar buttons
   document.getElementById('btnAddFriend').addEventListener('click', openAddFriendModal);
@@ -738,7 +738,7 @@ function setupEventListeners() {
         if (confBtn && !confBtn.disabled) {
           confirmAddFriendByCode();
         } else {
-          lookupFriendByCode();
+          void lookupFriendByCode();
         }
       }
     });
@@ -747,7 +747,7 @@ function setupEventListeners() {
   document.getElementById('btnFriendsNextWeek').addEventListener('click', () => changeFriendsWeek(7));
   document.getElementById('btnFriendsToday').addEventListener('click', () => {
     friendsState.currentMonday = formatFormattedDate(getMonday(new Date()));
-    loadFriendsCalendar();
+    void loadFriendsCalendar();
   });
   // Toggle: include myself in group view
   const btnToggleMyself = document.getElementById('btnToggleMyself');
@@ -833,18 +833,18 @@ function setupEventListeners() {
     } else {
       state.selectedDayDate = formatFormattedDate(today);
     }
-    loadCalendar(state.currentMonday);
+    void loadCalendar(state.currentMonday);
   });
 
   const btnRefresh = document.getElementById('btnRefresh');
   if (btnRefresh) {
     btnRefresh.addEventListener('click', () => {
       if (state.activeTab === 'timetable') {
-        loadCalendar(state.currentMonday, true);
+        void loadCalendar(state.currentMonday, true);
       } else if (state.activeTab === 'rooms') {
-        loadRoomsOccupancy(true);
+        void loadRoomsOccupancy(true);
       } else if (state.activeTab === 'exams') {
-        loadExams(true);
+        void loadExams(true);
       }
     });
   }
@@ -1058,11 +1058,11 @@ function setupEventListeners() {
     weekDatePicker.addEventListener('change', (e) => {
       if (!e.target.value) return;
       const selected = new Date(e.target.value);
-      if (isNaN(selected.getTime())) return;
+      if (Number.isNaN(selected.getTime())) return;
       const targetMonday = getMonday(selected);
       state.currentMonday = formatFormattedDate(targetMonday);
       state.selectedDayDate = formatFormattedDate(selected);
-      loadCalendar(state.currentMonday);
+      void loadCalendar(state.currentMonday);
       showToast(`Saltato al ${formatDateItalianLong(selected)}`);
     });
   }
@@ -1080,14 +1080,14 @@ function setupEventListeners() {
     roomsState.selectedBuilding = e.target.value;
     localStorage.setItem('unimib_rooms_building', roomsState.selectedBuilding);
     updateRoomsBuildingMapLink();
-    loadRoomsOccupancy();
+    void loadRoomsOccupancy();
   });
 
   document.getElementById('roomsDateInput').addEventListener('change', (e) => {
     if (e.target.value) {
       roomsState.selectedDate = e.target.value;
       updateRoomsDateDisplay();
-      loadRoomsOccupancy();
+      void loadRoomsOccupancy();
     }
   });
 
@@ -1200,7 +1200,7 @@ function setupEventListeners() {
       document.querySelectorAll('#roomsTimeBar .filter-pill').forEach(p => p.classList.remove('active'));
       pill.classList.add('active');
       roomsState.selectedTime = pill.getAttribute('data-time') || 'now';
-      loadRoomsOccupancy();
+      void loadRoomsOccupancy();
     });
   });
 
@@ -1237,7 +1237,7 @@ function setupEventListeners() {
         customRange.style.display = 'flex';
       } else {
         customRange.style.display = 'none';
-        loadExams();
+        void loadExams();
       }
     });
   });
@@ -1303,7 +1303,7 @@ function setupEventListeners() {
         return;
       }
     }
-    loadExams();
+    void loadExams();
   });
 
   // Exams Search & Autocomplete
@@ -1432,11 +1432,11 @@ function setupEventListeners() {
 
   document.getElementById('examYearFilter').addEventListener('change', (e) => {
     examsState.yearFilter = e.target.value;
-    loadExams();
+    void loadExams();
   });
 
   document.getElementById('btnRefreshExams').addEventListener('click', () => {
-    loadExams(true);
+    void loadExams(true);
   });
 
   // Close modals when clicking on background overlay
@@ -1532,7 +1532,7 @@ function setupEventListeners() {
   const btnOpenExtSetup = document.getElementById('btnOpenAddExternalFromSetup');
   if (btnOpenExtSetup) {
     btnOpenExtSetup.addEventListener('click', () => {
-      openAddExternalCourseModal();
+      void openAddExternalCourseModal();
     });
   }
   const btnCloseExt = document.getElementById('btnCloseAddExternalCourse');
@@ -1736,7 +1736,7 @@ async function enterPreview(shared) {
   document.getElementById('previewBanner').classList.add('active');
 
   applyConfig();
-  loadCalendar(state.currentMonday);
+  void loadCalendar(state.currentMonday);
 }
 
 function endPreview() {
@@ -1761,12 +1761,12 @@ function exitPreview() {
 
   if (state.config) {
     applyConfig();
-    loadCalendar(state.currentMonday);
+    void loadCalendar(state.currentMonday);
   } else {
     document.getElementById('headerSubtitle').textContent = 'Seleziona il tuo corso';
     document.getElementById('daysTabBar').innerHTML = '';
     showWelcome();
-    openSetup();
+    void openSetup();
   }
 }
 
@@ -2428,7 +2428,7 @@ async function saveSetup() {
       profileState.lastSync     = Date.now();
       profileState._pin         = setup._pendingProfile.pin;
       saveProfileLocally();
-      syncGroupCloud();
+      void syncGroupCloud();
 
       state.config = newConfig;
       saveConfig(state.config);
@@ -2445,7 +2445,7 @@ async function saveSetup() {
         setFilter('target');
       }
 
-      loadCalendar(state.currentMonday);
+      void loadCalendar(state.currentMonday);
       showToast(`Profilo creato con successo! Codice calendario: ${data.share_code}`, 5000);
       return;
     } catch (err) {
@@ -2470,7 +2470,7 @@ async function saveSetup() {
   applyConfig();
   state.calendarData = null;
   state.selectedDayDate = 'all';
-  loadCalendar(state.currentMonday);
+  void loadCalendar(state.currentMonday);
 }
 
 function fillSelect(select, options, placeholder) {
@@ -2564,14 +2564,14 @@ function removeExternalCourse(code) {
   saveConfig(state.config);
   clearCalendarCache();
   applyConfig();
-  loadCalendar(state.currentMonday);
+  void loadCalendar(state.currentMonday);
   showToast(`Rimosso: ${removed ? removed.label : code}`);
 }
 
 async function openAddExternalCourseModal() {
   if (!state.config) {
     showToast('Configura prima il tuo corso principale.');
-    openSetup();
+    void openSetup();
     return;
   }
   openModal('addExternalCourseModal');
@@ -2828,7 +2828,7 @@ function confirmAddExternalCourse() {
   clearCalendarCache();
   closeAddExternalCourseModal();
   applyConfig();
-  loadCalendar(state.currentMonday);
+  void loadCalendar(state.currentMonday);
   showToast(`Aggiunto: ${label} (${corsoLabel})!`);
 }
 
@@ -2856,7 +2856,7 @@ function changeWeek(dayOffset) {
   const monday = getMonday(dt);
   state.currentMonday = formatFormattedDate(monday);
   state.selectedDayDate = 'all';
-  loadCalendar(state.currentMonday);
+  void loadCalendar(state.currentMonday);
 }
 
 let sessionDismissedBanners = new Set();
@@ -3391,7 +3391,7 @@ function calendarUrl(mondayDateStr, forceRefresh) {
 
 async function loadCalendar(mondayDateStr, forceRefresh = false) {
   if (!state.config) {
-    openSetup();
+    void openSetup();
     return;
   }
 
@@ -3635,7 +3635,7 @@ function setupPullToRefresh() {
     const diff = changedTouch ? changedTouch.clientY - startY : 0;
     if (diff > 75 && window.scrollY === 0 && state.activeTab === 'timetable') {
       textEl.textContent = 'Ricarico orario da UNIMIB…';
-      loadCalendar(state.currentMonday, true);
+      void loadCalendar(state.currentMonday, true);
     }
     setTimeout(() => {
       indicator.style.display = 'none';
@@ -4101,7 +4101,7 @@ function parseAnyDate(d) {
 
 function formatDateItalianLong(d) {
   const dt = parseAnyDate(d);
-  if (!dt || isNaN(dt.getTime())) return String(d || '');
+  if (!dt || Number.isNaN(dt.getTime())) return String(d || '');
   const dayName = DAYS_NAMES_IT[dt.getDay()];
   const mName = MONTHS_NAMES_IT[dt.getMonth()];
   return `${dayName} ${dt.getDate()} ${mName} ${dt.getFullYear()}`;
@@ -4109,7 +4109,7 @@ function formatDateItalianLong(d) {
 
 function formatDateItalianShort(d) {
   const dt = parseAnyDate(d);
-  if (!dt || isNaN(dt.getTime())) return String(d || '');
+  if (!dt || Number.isNaN(dt.getTime())) return String(d || '');
   const day = String(dt.getDate()).padStart(2, '0');
   const month = String(dt.getMonth() + 1).padStart(2, '0');
   return `${day}/${month}/${dt.getFullYear()}`;
@@ -4157,13 +4157,13 @@ function switchTab(tabId) {
     document.getElementById('headerSubtitle').textContent = teachersState.selectedTeacher
       ? `Prof. ${teachersState.selectedTeacher.name}`
       : 'Calendario docenti';
-    initTeachersView();
+    void initTeachersView();
   } else if (tabId === 'rooms') {
     document.getElementById('headerSubtitle').textContent = 'Occupazione aule in tempo reale';
     if (!roomsState.buildings.length) {
-      loadRoomsBuildings();
+      void loadRoomsBuildings();
     } else if (!roomsState.data) {
-      loadRoomsOccupancy();
+      void loadRoomsOccupancy();
     }
   } else if (tabId === 'exams') {
     document.getElementById('headerSubtitle').textContent = 'Calendario appelli d\'esame';
@@ -4171,7 +4171,7 @@ function switchTab(tabId) {
   } else if (tabId === 'friends') {
     document.getElementById('headerSubtitle').textContent = 'Calendario condiviso amici';
     renderFriendChips();
-    loadFriendsCalendar();
+    void loadFriendsCalendar();
   }
 }
 
@@ -4208,7 +4208,7 @@ async function initTeachersView() {
   }
 
   if (teachersState.selectedTeacher) {
-    loadTeacherCalendar();
+    void loadTeacherCalendar();
   } else {
     // Show empty state
     const emptyState = document.getElementById('teachersEmptyState');
@@ -4272,7 +4272,7 @@ function renderTeacherAutocomplete(query = '') {
     if (teachersState.selectedYear) {
       container.innerHTML = '<div class="autocomplete-empty">Caricamento elenco docenti in corso...</div>';
       container.style.display = 'block';
-      loadTeachersList();
+      void loadTeachersList();
     } else {
       container.style.display = 'none';
     }
@@ -4466,7 +4466,7 @@ function selectTeacher(teacher, autoFetch = true) {
   renderFavoriteTeachersBar();
 
   if (autoFetch) {
-    loadTeacherCalendar();
+    void loadTeacherCalendar();
   }
 }
 
@@ -4689,7 +4689,7 @@ function changeTeacherWeek(dayOffset) {
   const monday = getMonday(dt);
   teachersState.currentMonday = formatFormattedDate(monday);
   teachersState.selectedDayDate = 'all';
-  loadTeacherCalendar();
+  void loadTeacherCalendar();
 }
 
 function renderTeacherCalendar() {
@@ -5005,9 +5005,9 @@ function setupTeachersEventListeners() {
     yearSelect.addEventListener('change', () => {
       teachersState.selectedYear = yearSelect.value;
       teachersState.allTeachers = [];
-      loadTeachersList(true);
+      void loadTeachersList(true);
       if (teachersState.selectedTeacher) {
-        loadTeacherCalendar(true);
+        void loadTeacherCalendar(true);
       }
     });
   }
@@ -5090,7 +5090,7 @@ function setupTeachersEventListeners() {
   const btnShare = document.getElementById('btnShareTeacherLink');
   if (btnShare) {
     btnShare.addEventListener('click', () => {
-      shareTeacherCalendar(teachersState.selectedTeacher);
+      void shareTeacherCalendar(teachersState.selectedTeacher);
     });
   }
 
@@ -5114,7 +5114,7 @@ function setupTeachersEventListeners() {
       btnViewAll.classList.remove('active');
       if (weekNav) weekNav.style.display = 'flex';
       if (daysBar) daysBar.style.display = 'flex';
-      loadTeacherCalendar();
+      void loadTeacherCalendar();
     });
 
     btnViewAll.addEventListener('click', () => {
@@ -5123,7 +5123,7 @@ function setupTeachersEventListeners() {
       btnViewWeek.classList.remove('active');
       if (weekNav) weekNav.style.display = 'none';
       if (daysBar) daysBar.style.display = 'none';
-      loadTeacherCalendar();
+      void loadTeacherCalendar();
     });
   }
 
@@ -5243,7 +5243,7 @@ function setupTeachersEventListeners() {
     btnToday.addEventListener('click', () => {
       teachersState.currentMonday = formatFormattedDate(getMonday(new Date()));
       teachersState.selectedDayDate = 'all';
-      loadTeacherCalendar();
+      void loadTeacherCalendar();
     });
   }
 }
@@ -5271,7 +5271,7 @@ async function loadRoomsBuildings() {
 
     document.getElementById('roomsDateInput').value = roomsState.selectedDate;
     updateRoomsDateDisplay();
-    loadRoomsOccupancy();
+    void loadRoomsOccupancy();
   } catch (err) {
     console.error('Error loading buildings:', err);
     showToast('Errore nel caricamento degli edifici');
@@ -5456,7 +5456,7 @@ function setRoomsDateToday() {
   roomsState.selectedDate = formatDateIso(new Date());
   document.getElementById('roomsDateInput').value = roomsState.selectedDate;
   updateRoomsDateDisplay();
-  loadRoomsOccupancy();
+  void loadRoomsOccupancy();
 }
 
 function changeRoomsDate(deltaDays) {
@@ -5465,7 +5465,7 @@ function changeRoomsDate(deltaDays) {
   roomsState.selectedDate = formatDateIso(dt);
   document.getElementById('roomsDateInput').value = roomsState.selectedDate;
   updateRoomsDateDisplay();
-  loadRoomsOccupancy();
+  void loadRoomsOccupancy();
 }
 
 function openRoomSchedule(room) {
@@ -5685,7 +5685,7 @@ function updateExamYearFilterOptions() {
 
   // 3. Fill all sequential years up to the max discovered year
   if (examsState.knownYears.size > 0) {
-    const maxYear = Math.max(...Array.from(examsState.knownYears).map(Number).filter(n => !isNaN(n) && n > 0));
+    const maxYear = Math.max(...Array.from(examsState.knownYears).map(Number).filter(n => !Number.isNaN(n) && n > 0));
     for (let y = 1; y <= maxYear; y++) {
       examsState.knownYears.add(String(y));
     }
@@ -5700,7 +5700,7 @@ function updateExamYearFilterOptions() {
 
   const sortedYears = Array.from(examsState.knownYears)
     .map(Number)
-    .filter(n => !isNaN(n) && n > 0)
+    .filter(n => !Number.isNaN(n) && n > 0)
     .sort((a, b) => a - b);
 
   const currentValue = examsState.yearFilter || select.value || '';
@@ -5722,7 +5722,7 @@ function initExamsView() {
   renderExamCourseChips();
   updateExamYearFilterOptions();
   if (!examsState.exams.length) {
-    loadExams();
+    void loadExams();
   }
 }
 
@@ -6219,7 +6219,7 @@ function confirmAddExamCourse() {
   renderExamCourseChips();
   closeAddExamCourseModal();
   showToast(`Aggiunto corso ${label}`);
-  loadExams();
+  void loadExams();
 }
 
 function removeExamCourse(code) {
@@ -6229,7 +6229,7 @@ function removeExamCourse(code) {
   saveExamCourses(examsState.extraCourses);
   renderExamCourseChips();
   showToast('Corso rimosso dal calendario esami');
-  loadExams();
+  void loadExams();
 }
 
 
@@ -6421,7 +6421,7 @@ function handleCreateProfileStep2() {
 
   setup._pendingProfile = creds;
   closeModal('profileModal');
-  openSetup(state.config || {}, creds);
+  void openSetup(state.config || {}, creds);
 }
 
 const handleCreateProfile = handleCreateProfileStep2;
@@ -6466,7 +6466,7 @@ async function handleCreateWithExistingConfig() {
     profileState.lastSync     = Date.now();
     profileState._pin         = creds.pin;
     saveProfileLocally();
-    syncGroupCloud();
+    void syncGroupCloud();
     renderProfileModal();
     showToast(`Profilo creato! Il tuo codice calendario è: ${data.share_code}`, 5000);
     setTimeout(() => {
@@ -6564,7 +6564,7 @@ async function handleLoginProfile() {
       if (data.config.favorites && data.config.favorites.length > 0) {
         setFilter('target');
       }
-      loadCalendar(state.currentMonday);
+      void loadCalendar(state.currentMonday);
     }
     if (data.exam_courses && data.exam_courses.length && !examsState.extraCourses.length) {
       examsState.extraCourses = data.exam_courses;
@@ -6580,12 +6580,12 @@ async function handleLoginProfile() {
     profileState.lastSync     = Date.now();
     profileState._pin         = pin;
     saveProfileLocally();
-    syncGroupCloud();
+    void syncGroupCloud();
     renderProfileModal();
     showToast(`Bentornato, ${data.nickname}!`);
     setTimeout(() => {
       closeModal('profileModal');
-      if (!state.config) openSetup();
+      if (!state.config) void openSetup();
     }, 1200);
   } catch (e) {
     errEl.textContent = 'Errore di connessione. Riprova.';
@@ -6674,7 +6674,7 @@ async function handleRecoverPin() {
     profileState.lastSync     = Date.now();
     profileState._pin         = pin;
     saveProfileLocally();
-    syncGroupCloud();
+    void syncGroupCloud();
     renderProfileModal();
     showToast(`PIN reimpostato con successo! Nuovo codice: ${data.recovery_code}`, 6000);
     setTimeout(() => {
@@ -7000,7 +7000,7 @@ async function confirmCreateGroup() {
     renderGroupSwitcher();
     renderFriendChips();
     updateFriendsGroupHeader();
-    loadFriendsCalendar();
+    void loadFriendsCalendar();
     showToast(`Gruppo "${data.group.name}" creato! Codice: ${data.group.id}`, 5000);
   } catch (e) {
     if (errEl) { errEl.textContent = 'Errore di connessione.'; errEl.style.display = ''; }
@@ -7081,7 +7081,7 @@ async function confirmJoinGroup() {
     renderGroupSwitcher();
     renderFriendChips();
     updateFriendsGroupHeader();
-    loadFriendsCalendar();
+    void loadFriendsCalendar();
     showToast(`Ti sei unito al gruppo "${data.group.name}"!`);
   } catch (e) {
     if (errEl) { errEl.textContent = 'Errore di connessione.'; errEl.style.display = ''; }
@@ -7396,9 +7396,9 @@ function confirmAddFriendByCode() {
   }
 
   if (profile.isGroup) {
-    handleJoinGroup(profile);
+    void handleJoinGroup(profile);
   } else {
-    _addFriend({ id: profile.id, nickname: profile.nickname });
+    void _addFriend({ id: profile.id, nickname: profile.nickname });
   }
 
   closeModal('addFriendModal');
@@ -7450,7 +7450,7 @@ async function handleJoinGroup(groupProfile) {
   renderFriendChips();
   updateFriendsGroupHeader();
   friendsState.events = [];
-  loadFriendsCalendar();
+  void loadFriendsCalendar();
   showToast(`Ti sei unito al gruppo "${groupProfile.group_name}"!`);
 }
 
@@ -7463,7 +7463,7 @@ function addFriendFromSearch(id, nickname) {
     showToast('Questo amico è già nel gruppo');
     return;
   }
-  _addFriend({ id, nickname });
+  void _addFriend({ id, nickname });
   closeModal('addFriendModal');
 }
 
@@ -7483,7 +7483,7 @@ async function _addFriend({ id, nickname }) {
       friendsState.events = [];
       renderFriendChips();
       showToast(`${nickname} aggiunto! Crea o accedi a un profilo per salvare il gruppo nel cloud`);
-      loadFriendsCalendar();
+      void loadFriendsCalendar();
       return;
     }
     // Create new group automatically for this friend
@@ -7555,7 +7555,7 @@ async function _addFriend({ id, nickname }) {
   }
 
   if (state.activeTab === 'friends') {
-    loadFriendsCalendar();
+    void loadFriendsCalendar();
   }
 }
 
@@ -7599,7 +7599,7 @@ function removeFriend(id) {
   const hasFriends = friendsState.friends.length > 0;
   const hasMyself  = friendsState.showMyself && profileState.shareCode && state.config;
   if (hasFriends || hasMyself) {
-    loadFriendsCalendar();
+    void loadFriendsCalendar();
   } else {
     renderFriendsView();
   }
@@ -7656,9 +7656,9 @@ function renderFriendChips() {
 }
 
 function hexToRgba(hex, alpha) {
-  const r = parseInt(hex.slice(1,3),16);
-  const g = parseInt(hex.slice(3,5),16);
-  const b = parseInt(hex.slice(5,7),16);
+  const r = Number.parseInt(hex.slice(1,3),16);
+  const g = Number.parseInt(hex.slice(3,5),16);
+  const b = Number.parseInt(hex.slice(5,7),16);
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
@@ -7760,19 +7760,19 @@ async function loadFriendsCalendar() {
 
 function changeFriendsWeek(offset) {
   const parts = (friendsState.currentMonday || formatFormattedDate(getMonday(new Date()))).split('-');
-  const dt    = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+  const dt    = new Date(Number.parseInt(parts[2]), Number.parseInt(parts[1]) - 1, Number.parseInt(parts[0]));
   dt.setDate(dt.getDate() + offset);
   friendsState.currentMonday = formatFormattedDate(getMonday(dt));
   friendsState.events  = [];
   friendsState.myEvents = [];
-  loadFriendsCalendar();
+  void loadFriendsCalendar();
 }
 
 function updateFriendsWeekLabel() {
   const labelEl = document.getElementById('friendsWeekLabel');
   if (!labelEl || !friendsState.currentMonday) return;
   const parts   = friendsState.currentMonday.split('-');
-  const monday  = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+  const monday  = new Date(Number.parseInt(parts[2]), Number.parseInt(parts[1]) - 1, Number.parseInt(parts[0]));
   const friday  = new Date(monday);
   friday.setDate(monday.getDate() + 4);
   labelEl.textContent = `${formatDateItalianShort(formatDateIso(monday))} – ${formatDateItalianShort(formatDateIso(friday))}`;
@@ -7984,7 +7984,7 @@ function renderFriendsGrid(allEvents, hasMyself, hasFriends) {
 
   // 1. Build week days (Mon-Fri + optional Sat)
   const parts = (friendsState.currentMonday || formatFormattedDate(getMonday(new Date()))).split('-');
-  const mondayDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+  const mondayDate = new Date(Number.parseInt(parts[2]), Number.parseInt(parts[1]) - 1, Number.parseInt(parts[0]));
 
   const dayNamesShort = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
   const dayNamesLong  = ['Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
@@ -8008,7 +8008,7 @@ function renderFriendsGrid(allEvents, hasMyself, hasFriends) {
   const hasSaturday = allEvents.some(ev => {
     const p = (ev.date || '').split('-');
     if (p.length !== 3) return false;
-    const d = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
+    const d = new Date(Number.parseInt(p[2]), Number.parseInt(p[1]) - 1, Number.parseInt(p[0]));
     return d.getDay() === 6;
   });
   if (hasSaturday) {
@@ -8318,7 +8318,7 @@ function renderFreeSlots(allEvents, hasMyself, hasFriends) {
 
   // 2. Generate all week days (Mon-Fri + optional Sat) so days with zero lectures are shown as 100% free
   const parts = (friendsState.currentMonday || formatFormattedDate(getMonday(new Date()))).split('-');
-  const mondayDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+  const mondayDate = new Date(Number.parseInt(parts[2]), Number.parseInt(parts[1]) - 1, Number.parseInt(parts[0]));
   const weekDates = [];
 
   for (let i = 0; i < 5; i++) {
@@ -8331,7 +8331,7 @@ function renderFreeSlots(allEvents, hasMyself, hasFriends) {
   const hasSaturday = allEvents.some(ev => {
     const p = (ev.date || '').split('-');
     if (p.length !== 3) return false;
-    const d = new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
+    const d = new Date(Number.parseInt(p[2]), Number.parseInt(p[1]) - 1, Number.parseInt(p[0]));
     return d.getDay() === 6;
   });
   if (hasSaturday) {
@@ -8434,7 +8434,7 @@ function handleOnboardingGuest() {
   localStorage.setItem('unimib_guest_chosen', '1');
   closeOnboardingModal();
   showWelcome();
-  openSetup();
+  void openSetup();
 }
 
 
@@ -8475,11 +8475,11 @@ async function handleFriendShareUrl(friendCode) {
     } else if (friendsState.friends.some(f => (f.id || '').toUpperCase() === friendId.toUpperCase())) {
       showToast(`${nickname} è già nel tuo calendario amici`);
       friendsState.isLoading = false;
-      loadFriendsCalendar(); // reload to ensure view is current
+      void loadFriendsCalendar(); // reload to ensure view is current
     } else {
       // _addFriend handles saving and triggers loadFriendsCalendar (we set isLoading=false first)
       friendsState.isLoading = false;
-      _addFriend({ id: friendId, nickname: nickname });
+      void _addFriend({ id: friendId, nickname: nickname });
     }
   } catch (err) {
     console.error('Error fetching friend by link:', err);
@@ -8557,7 +8557,7 @@ async function handleSharedGroupUrl(groupStr) {
     }
 
     friendsState.isLoading = false;
-    loadFriendsCalendar();
+    void loadFriendsCalendar();
     if (newFriends.length > 0) {
       showToast('Gruppo amici caricato nel calendario!');
     }
@@ -8628,6 +8628,6 @@ function copyGroupUrlToClipboard(url) {
 // Auto-sync friends group when tab becomes visible
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && state.activeTab === 'friends' && !friendsState.isLoading) {
-    loadFriendsCalendar();
+    void loadFriendsCalendar();
   }
 });
