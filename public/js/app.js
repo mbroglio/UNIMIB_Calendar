@@ -5651,9 +5651,9 @@ function updateExamYearFilterOptions() {
   // 1. From active state.config (if user is in year K, years 1..K exist)
   if (state.config && Array.isArray(state.config.anni)) {
     state.config.anni.forEach(a => {
-      const match = String(a).match(/(\d+)$/);
+      const match = String(a).match(/\b(\d+)$/);
       if (match) {
-        const num = parseInt(match[1], 10);
+        const num = Number.parseInt(match[1], 10);
         for (let y = 1; y <= num; y++) {
           examsState.knownYears.add(String(y));
         }
@@ -5662,9 +5662,9 @@ function updateExamYearFilterOptions() {
   }
   if (state.config && Array.isArray(state.config.anniLabels)) {
     state.config.anniLabels.forEach(lbl => {
-      const match = String(lbl).match(/(\d+)°/);
+      const match = String(lbl).match(/\b(\d+)°/);
       if (match) {
-        const num = parseInt(match[1], 10);
+        const num = Number.parseInt(match[1], 10);
         for (let y = 1; y <= num; y++) {
           examsState.knownYears.add(String(y));
         }
@@ -5886,8 +5886,7 @@ function getExamCourseColor(ex) {
   const key = code || ex.name || 'exam';
   let hash = 0;
   for (let i = 0; i < key.length; i++) {
-    hash = (hash << 5) - hash + key.charCodeAt(i);
-    hash |= 0;
+    hash = Math.trunc((hash << 5) - hash + key.charCodeAt(i));
   }
   const idx = Math.abs(hash) % FAVORITE_COLORS.length;
   return FAVORITE_COLORS[idx];
@@ -5962,7 +5961,7 @@ function renderExams() {
     groups[key].push(ex);
   });
 
-  container.innerHTML = Object.keys(groups).sort().map(dateKey => {
+  container.innerHTML = Object.keys(groups).sort((a, b) => a.localeCompare(b)).map(dateKey => {
     const list = groups[dateKey];
     const first = list[0];
     const dateHeader = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide-icon" style="margin-right:6px; vertical-align:-2px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>${first.date_long || formatDateItalianLong(first.date)} (${first.date_formatted || formatDateItalianShort(first.date)})`;

@@ -42,14 +42,14 @@ def parse_exam_event(ev):
 
     parts = [s.strip() for s in re.split(r'//+|/(?=[^/\[]+\[[A-Za-z0-9_-]+\])', desc)] if desc else ['']
     courses = []
-    yr_fallback_m = re.search(r'(\d+)[^\S\r\n]*anno', desc or '', re.IGNORECASE)
+    yr_fallback_m = re.search(r'\b(\d+)\s{0,10}anno\b', desc or '', re.IGNORECASE)
     yr_fallback = yr_fallback_m.group(1) if yr_fallback_m else ''
 
     for p in parts:
         code_m = re.search(r'\[([A-Za-z0-9_-]+)\]', p)
-        yr_m = re.search(r'(\d+)[^\S\r\n]*anno', p, re.IGNORECASE)
+        yr_m = re.search(r'\b(\d+)\s{0,10}anno\b', p, re.IGNORECASE)
         title_m = re.search(r'(?:Nome corso di laurea:\s*|Corso di laurea:\s*)([^\[]+)', p)
-        curr_m = re.search(r'(?:Curriculum|,)[^\S\r\n]*([^/\-]+)$', p.strip(), re.IGNORECASE)
+        curr_m = re.search(r'(?:Curriculum|,)\s{0,10}([^/\-\s][^/\-]*)$', p.strip(), re.IGNORECASE)
 
         c_code = code_m.group(1).upper() if code_m else ''
         c_year = yr_m.group(1) if yr_m else (yr_fallback if len(parts) == 1 else '')

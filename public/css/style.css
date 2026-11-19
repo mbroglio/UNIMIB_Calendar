@@ -2119,7 +2119,8 @@ body {
   margin-bottom: 14px;
 }
 
-.form-field > label {
+.form-field > label,
+.form-field .form-field-label {
   font-size: 0.8rem;
   font-weight: 700;
   color: var(--text-secondary);

@@ -210,6 +210,7 @@ def fetch_upstream(url: str, headers: Optional[dict] = None, timeout: int = 10, 
 # ── Upstash Redis Client with Local Fallback ──────────────────────────────────
 _LOCAL_STORE_PATH = os.path.join(tempfile.gettempdir(), "unimib_kv_store.json")
 _LOCAL_LOCK = threading.Lock()
+_LOCAL_MEM_STORE: Dict[str, Any] = {}
 
 def _load_env_files() -> None:
     """Carica variabili d'ambiente da .env o .env.local se presenti nella root."""
@@ -250,22 +251,14 @@ def get_redis_creds() -> Tuple[str, str]:
     return url, token
 
 def _local_kv_load() -> dict:
-    if os.path.exists(_LOCAL_STORE_PATH):
-        try:
-            with open(_LOCAL_STORE_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    return data
-        except Exception:
-            pass
-    return {}
+    if not os.path.exists(_LOCAL_STORE_PATH):
+        _LOCAL_MEM_STORE.clear()
+    return _LOCAL_MEM_STORE
 
 def _local_kv_save(store: dict) -> None:
-    tmp_path = _LOCAL_STORE_PATH + f".{secrets.token_hex(4)}.tmp"
     try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(store, f, ensure_ascii=False)
-        os.replace(tmp_path, _LOCAL_STORE_PATH)
+        with open(_LOCAL_STORE_PATH, "w", encoding="utf-8") as f:
+            f.write("{}")
     except Exception:
         pass
 

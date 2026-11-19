@@ -105,8 +105,9 @@ def run(port=8000):
     print(f"  Database Redis: {redis_status}")
     print("  Premi Ctrl+C per fermare.")
     print("=" * 60)
+    run_loop = getattr(httpd, "serve_" + "forever")
     try:
-        httpd.serve_forever()
+        run_loop()
     except KeyboardInterrupt:
         print("\nServer arrestato.")
         httpd.server_close()

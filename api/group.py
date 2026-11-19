@@ -45,7 +45,18 @@ _parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _parent_dir not in sys.path:
     sys.path.insert(0, _parent_dir)
 
-from api._common import get_redis_creds as _get_redis_creds, BaseApiHandler
+from api._common import (
+    get_redis_creds as _get_redis_creds,
+    BaseApiHandler,
+    _LOCAL_STORE_PATH,
+    _local_kv_load,
+    _local_kv_save,
+    _local_redis,
+    redis_cmd as _redis,
+    redis_get,
+    redis_set,
+    redis_del,
+)
 
 # Curated 12 distinct high-contrast colors for group members
 MEMBER_COLORS = [
@@ -67,73 +78,6 @@ SHARE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 GROUP_CODE_LEN = 6
 SESSION_TTL_SECONDS = 90 * 86400
 
-# ── Local File/In-Memory Key-Value Fallback (when Upstash Redis is not configured) ────
-_LOCAL_STORE_PATH = os.path.join(tempfile.gettempdir(), "unimib_kv_store.json")
-_LOCAL_LOCK = threading.Lock()
-
-def _local_kv_load() -> dict:
-    if os.path.exists(_LOCAL_STORE_PATH):
-        try:
-            with open(_LOCAL_STORE_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    return data
-        except Exception:
-            pass
-    return {}
-
-def _local_kv_save(store: dict):
-    tmp_path = _LOCAL_STORE_PATH + f".{secrets.token_hex(4)}.tmp"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(store, f, ensure_ascii=False)
-        os.replace(tmp_path, _LOCAL_STORE_PATH)
-    except Exception:
-        pass
-
-def _local_redis(method: str, *args):
-    with _LOCAL_LOCK:
-        store = _local_kv_load()
-        now = time.time()
-        m = method.upper()
-
-        if m == "GET":
-            key = str(args[0])
-            item = store.get(key)
-            if item is None:
-                return None
-            if isinstance(item, dict) and "v" in item:
-                exp = item.get("e")
-                if exp and now > exp:
-                    store.pop(key, None)
-                    _local_kv_save(store)
-                    return None
-                return item["v"]
-            return item
-
-        elif m == "SET":
-            key = str(args[0])
-            val = str(args[1])
-            exp = None
-            if len(args) >= 4 and str(args[2]).upper() == "EX":
-                try:
-                    exp = now + float(args[3])
-                except Exception:
-                    exp = None
-            store[key] = {"v": val, "e": exp}
-            _local_kv_save(store)
-            return "OK"
-
-        elif m == "DEL":
-            key = str(args[0])
-            if key in store:
-                store.pop(key, None)
-                _local_kv_save(store)
-                return 1
-            return 0
-
-        return None
-
 
 # ── Sanitization & Anti-XSS Helpers ───────────────────────────────────────────
 
@@ -153,47 +97,6 @@ def _sanitize_text(s: Any, max_len: int = 40) -> str:
 
 def _is_safe_code(code: str) -> bool:
     return bool(code and re.match(r'^[A-Za-z0-9_-]{3,32}$', code))
-
-
-# ── Redis Helpers ─────────────────────────────────────────────────────────────
-
-def _redis(method: str, *args):
-    url, token = _get_redis_creds()
-    if not url or not token:
-        return _local_redis(method, *args)
-
-    path = "/" + "/".join(urllib.parse.quote(str(a), safe="") for a in (method, *args))
-    req  = urllib.request.Request(url + path, headers={"Authorization": f"Bearer {token}"})
-    try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            body = json.loads(resp.read())
-        if "error" in body:
-            raise RuntimeError(f"Redis error: {body['error']}")
-        return body.get("result")
-    except Exception:
-        return _local_redis(method, *args)
-
-
-def redis_get(key: str):
-    raw = _redis("GET", key)
-    if raw is None:
-        return None
-    try:
-        return json.loads(raw)
-    except Exception:
-        return raw
-
-
-def redis_set(key: str, value, ex: Optional[int] = None):
-    val_str = json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
-    if ex:
-        _redis("SET", key, val_str, "EX", ex)
-    else:
-        _redis("SET", key, val_str)
-
-
-def redis_del(key: str):
-    _redis("DEL", key)
 
 
 def _gen_group_id() -> str:
