@@ -11,6 +11,7 @@ Shared foundational utilities across all Vercel Python serverless endpoints:
 """
 
 import os
+import html
 import json
 import re
 import time
@@ -385,7 +386,18 @@ class BaseApiHandler(BaseHTTPRequestHandler):
     """Base handler implementing OWASP secure headers, CORS, and response helpers."""
 
     def send_json(self, status: int, payload: Any, cache_control: Optional[str] = None, allow_origin: Optional[str] = "*"):
-        data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        def _escape_obj(val: Any) -> Any:
+            if isinstance(val, str):
+                return html.escape(val, quote=False)
+            if isinstance(val, dict):
+                return {str(k): _escape_obj(v) for k, v in val.items()}
+            if isinstance(val, list):
+                return [_escape_obj(item) for item in val]
+            return val
+
+        raw_json = json.dumps(_escape_obj(payload), ensure_ascii=False)
+        safe_json = raw_json.replace("<", r"\u003c").replace(">", r"\u003e").replace("&", r"\u0026")
+        data = safe_json.encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         if allow_origin:

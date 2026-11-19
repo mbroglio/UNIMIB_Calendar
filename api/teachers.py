@@ -35,12 +35,16 @@ _safe_ts = safe_ts
 
 def extract_emails(mail_str, link_str=''):
     combined = f"{mail_str or ''} {link_str or ''}"
-    emails = re.findall(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', combined)
+    tokens = re.split(r'[^a-zA-Z0-9_.+@-]+', combined)
+    emails = [
+        tok for tok in tokens
+        if tok.count("@") == 1 and tok.split("@")[0] and "." in tok.split("@")[1]
+    ]
     seen = set()
     result = []
     for e in emails:
-        low = e.lower()
-        if low not in seen:
+        low = e.lower().strip(".")
+        if low and low not in seen:
             seen.add(low)
             result.append(low)
     return result
